@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Locally-installed agent skills (generated via `npx skills`), not app code
+.agents/
+.claude/
