@@ -90,8 +90,8 @@ tests/
 - `198fd1a`/`7ae812a`/`a840522`/`f587238` Vue 化全部交互：补读侧小功能（全部收起/刷新）+ Shiki 代码高亮；续接 session（composer + SSE live 块）；深问 🔍问（工具查证流式）；Chat 视图（Sessions/Chat 切换 + 预置提示词 + 系统提示词 + 流式对话 + model 信息）
 - `e115689` `.project` 标题任意折行
 - 收尾：后端 `/` 与静态资源改为 serve `web/dist`（构建产物）+ SPA fallback，未构建时返回开发提示；根 `npm run build:web`；README 写双进程开发与单进程构建两种流程
-- 28 测试通过（后端）；前端 vue-tsc 类型检查通过；与原原生 HTML 功能对齐
+- `3ff2b43` session 内消息内容搜索：时间线头部搜索框过滤消息 + 命中高亮（标签间文本插入，不破坏 markdown）+ N/M 计数
+- 28 测试通过（后端）；前端 vue-tsc 类型检查通过；与原原生 HTML 功能对齐并扩展
 
-**下一步（顺序）：**
-1. session 内消息内容搜索（当前仅目录/session 名称搜索）
-2. v2 项（见 Deferred）
+**下一步：**
+- v2 项（见 Deferred，动手前先回来和用户确认）：多 provider 跨家对比、磁盘写入、常驻 B 执行模型 + WS、SQLite、memory/stats/history 视图。
