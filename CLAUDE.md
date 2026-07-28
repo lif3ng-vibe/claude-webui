@@ -23,4 +23,8 @@
 
 ## 开发
 - `npm test` 跑单测；`npm run typecheck` 类型检查；`npm run build` 编译。
+- `npm run dev` 启开发服务（http://localhost:3000）。
 - 续接 session 前置：每个 sessionId 加锁，禁止并发写同一 session。
+
+## 当前进度
+状态与下一步见 `docs/design.md` 的"当前进度 / 下一步"一节。开工前先读该节，再按需读全文。

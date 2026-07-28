@@ -74,3 +74,18 @@ tests/
 - Persistent interactive execution model (B) + WebSocket bidirectional.
 - SQLite persistence (when conversations need search/pagination).
 - `memory/` browser, stats dashboard, history-prompt view.
+
+## 当前进度 / 下一步
+
+> 维护说明：每完成一个里程碑就更新本节。这是**随 git 仓库走**的进度来源；`~/.claude/projects/<cwd>/memory/` 下的项目记忆是本地镜像，可能滞后，以本文件为准。
+
+**已完成（main 分支，未 push）：**
+- `bad140f` 骨架：设计文档、claude/provider 接口、路径编码单测
+- `a0f0b16` 可运行读侧：HTTP 服务（projects/sessions/messages 只读 API）+ session 浏览查看器 + 搜索高亮
+- `f8c0b52` 续接能力：`ClaudeRunner`（prompt 经 stdin 传入避免注入、Windows 需 `shell:true`）+ SSE `/run` 端点 + per-sessionId 锁 + 前端发指令流式显示
+- 14 测试通过；`npm run dev` 启服务在 http://localhost:3000
+
+**下一步（顺序）：**
+1. `AnthropicProvider.stream`：Anthropic SDK 流式 + 只读磁盘工具（`read_file`/`list_files`/`grep`，范围 = session cwd + `~/.claude`）+ 对话页 + 预置系统提示词库
+2. Vue 3 + Vite 前端：Naive UI + markdown-it + Shiki + @tanstack/vue-virtual + 自写消息/tool-call 组件 + Pinia/@tanstack/vue-query（替换当前原生 HTML 查看器）
+3. 打磨：续接后回读 jsonl 刷新、消息体折叠 tool-call/diff、消息内容搜索
