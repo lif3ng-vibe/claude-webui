@@ -83,9 +83,10 @@ tests/
 - `bad140f` 骨架：设计文档、claude/provider 接口、路径编码单测
 - `a0f0b16` 可运行读侧：HTTP 服务（projects/sessions/messages 只读 API）+ session 浏览查看器 + 搜索高亮
 - `f8c0b52` 续接能力：`ClaudeRunner`（prompt 经 stdin 传入避免注入、Windows 需 `shell:true`）+ SSE `/run` 端点 + per-sessionId 锁 + 前端发指令流式显示
-- 14 测试通过；`npm run dev` 启服务在 http://localhost:3000
+- `7ee7443` provider 对话：`AnthropicProvider`（SDK 流式，text/thinking/tool_use/done/error，兼容 Anthropic 代理）+ `config`（env 优先、去 `[1m]` 后缀）+ `PromptsStore`（预置提示词库）+ `/api/config|prompts|chat` + 前端 Sessions/Chat 视图切换
+- 21 测试通过；`npm run dev` 启服务在 http://localhost:3000
 
 **下一步（顺序）：**
-1. `AnthropicProvider.stream`：Anthropic SDK 流式 + 只读磁盘工具（`read_file`/`list_files`/`grep`，范围 = session cwd + `~/.claude`）+ 对话页 + 预置系统提示词库
+1. **工具查证（session 步骤深问）**：`AnthropicProvider` 加只读磁盘工具（`read_file`/`list_files`/`grep`，范围 = session cwd + `~/.claude`）+ agent 循环（模型调工具→执行只读→回填→继续）；前端在 session 消息时间线上对某一步“向 LLM 提问”，把该步作为上下文带系统提示词发起工具查证对话
 2. Vue 3 + Vite 前端：Naive UI + markdown-it + Shiki + @tanstack/vue-virtual + 自写消息/tool-call 组件 + Pinia/@tanstack/vue-query（替换当前原生 HTML 查看器）
 3. 打磨：续接后回读 jsonl 刷新、消息体折叠 tool-call/diff、消息内容搜索
