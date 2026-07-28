@@ -16,8 +16,10 @@
     .collapse-all { margin-top: 6px; font-size: 12px; color: #8ab4f8; cursor: pointer; background: none; border: none; padding: 2px 0; }
     .collapse-all:hover { text-decoration: underline; }
     #tree { padding: 8px; }
-    .main { overflow: auto; padding: 16px; }
-    .crumb { font-size: 12px; color: #888; margin-bottom: 12px; }
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+    .head-bar { padding: 12px 16px 0; }
+    .crumb { font-size: 12px; color: #888; margin-bottom: 8px; }
+    #timeline { flex: 1; overflow: auto; padding: 0 16px 12px; }
     .item { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
     .item:hover { background: #2a2a2a; }
     .item.active { background: #2d3a5a; }
@@ -32,6 +34,7 @@
     .msg.user { border-color: #8ab4f8; }
     .msg.assistant { border-color: #34a853; }
     .msg.tool { border-color: #fbbc04; }
+    .msg.live { opacity: 0.92; border-style: dashed; }
     .msg .role { font-size: 11px; color: #888; text-transform: uppercase; }
     .msg .time { font-size: 11px; color: #666; margin-left: 8px; }
     .msg .body { white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
@@ -39,6 +42,14 @@
     .tool-call { color: #fbbc04; }
     .tool-result { color: #aaa; font-size: 12px; }
     .empty { color: #666; padding: 10px 8px; }
+    .composer { border-top: 1px solid #333; padding: 10px 16px; display: flex; gap: 8px; align-items: flex-end; background: #1d1d1d; }
+    .composer textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 160px; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 8px; font: inherit; }
+    .composer textarea:focus { outline: none; border-color: #8ab4f8; }
+    .composer button { padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font: inherit; }
+    .send { background: #8ab4f8; color: #1a1a1a; font-weight: 600; }
+    .send:disabled { background: #444; color: #888; cursor: not-allowed; }
+    .stop { background: #444; color: #ddd; }
+    .composer .hint { font-size: 11px; color: #fbbc04; }
   </style>
 </head>
 <body>
@@ -52,8 +63,15 @@
       <div id="tree"><div class="empty">加载中…</div></div>
     </div>
     <div class="main">
-      <div class="crumb" id="crumb">选择左侧的工作目录</div>
+      <div class="head-bar">
+        <div class="crumb" id="crumb">选择左侧的工作目录</div>
+      </div>
       <div id="timeline"></div>
+      <div class="composer">
+        <textarea id="prompt" placeholder="选择一个 session 后可发送指令…" disabled></textarea>
+        <button id="sendBtn" class="send" disabled>发送</button>
+        <button id="stopBtn" class="stop" hidden>停止</button>
+      </div>
     </div>
   </div>
 <script>
@@ -62,20 +80,23 @@ const crumb = document.getElementById('crumb');
 const timeline = document.getElementById('timeline');
 const search = document.getElementById('search');
 const collapseAllBtn = document.getElementById('collapseAll');
+const promptEl = document.getElementById('prompt');
+const sendBtn = document.getElementById('sendBtn');
+const stopBtn = document.getElementById('stopBtn');
 
 let projects = [];
-const sessionsCache = {};        // dirName -> SessionEntry[]
-const projectRows = [];          // { p, row, sub, caret, title }
+const sessionsCache = {};
+const projectRows = [];
+let active = { dir: null, sid: null, title: '' };
 let activeSessionEl = null;
+let runningAC = null;
 
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function fmtBytes(n){ return n < 1024 ? n+' B' : n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB'; }
 
-// 转义并用 <mark> 高亮命中子串
 function hl(text, q){
   if (!q) return esc(text);
-  const low = text.toLowerCase();
-  const ql = q.toLowerCase();
+  const low = text.toLowerCase(), ql = q.toLowerCase();
   let out = '', i = 0;
   for (;;){
     const idx = low.indexOf(ql, i);
@@ -91,15 +112,13 @@ function clearActive(){ if (activeSessionEl){ activeSessionEl.classList.remove('
 function anyExpanded(){ return projectRows.some(({ sub }) => !sub.hidden); }
 function updateCollapseBtn(){ collapseAllBtn.hidden = !anyExpanded(); }
 function setExpanded(row, sub, open){ sub.hidden = !open; row.querySelector('.caret').textContent = open ? '▾' : '▸'; }
+function setComposerEnabled(on){ promptEl.disabled = !on; sendBtn.disabled = !on; promptEl.placeholder = on ? '向该 session 发送指令…（将以 skip-permissions 运行 claude --resume）' : '选择一个 session 后可发送指令…'; }
 
 async function fetchSessions(dir){
   if (!sessionsCache[dir]) sessionsCache[dir] = await (await fetch(`/api/projects/${dir}/sessions`)).json();
   return sessionsCache[dir];
 }
-
-function paintProjectTitle(row, p, q){
-  row.querySelector('.title').innerHTML = hl(p.cwd, q);
-}
+function paintProjectTitle(row, p, q){ row.querySelector('.title').innerHTML = hl(p.cwd, q); }
 
 function renderSessions(dir, sub, q, filter){
   const sessions = sessionsCache[dir] || [];
@@ -138,12 +157,9 @@ async function loadProjects(){
     const cnt = document.createElement('span'); cnt.className = 'sub'; cnt.textContent = String(p.sessionCount);
     row.appendChild(caret); row.appendChild(title); row.appendChild(cnt);
     paintProjectTitle(row, p, '');
-    const sub = document.createElement('div');
-    sub.className = 'sub-tree';
-    sub.hidden = true;
+    const sub = document.createElement('div'); sub.className = 'sub-tree'; sub.hidden = true;
     row.onclick = () => toggleProject(p, row, sub);
-    tree.appendChild(row);
-    tree.appendChild(sub);
+    tree.appendChild(row); tree.appendChild(sub);
     projectRows.push({ p, row, sub });
   }
   updateCollapseBtn();
@@ -164,20 +180,12 @@ async function applySearch(){
     const matching = (sessionsCache[p.dirName] || []).filter(sesMatch);
     if (dirMatch || matching.length){
       row.style.display = '';
-      if (matching.length){
-        setExpanded(row, sub, true);
-        renderSessions(p.dirName, sub, q, sesMatch);  // 有命中 session：展开只显示命中
-      } else {
-        setExpanded(row, sub, false);                 // 目录命中但无 session 命中：不展开
-      }
-    } else {
-      row.style.display = 'none';
-      sub.hidden = true;
-    }
+      if (matching.length){ setExpanded(row, sub, true); renderSessions(p.dirName, sub, q, sesMatch); }
+      else { setExpanded(row, sub, false); }
+    } else { row.style.display = 'none'; sub.hidden = true; }
   }
   updateCollapseBtn();
 }
-
 search.oninput = applySearch;
 collapseAllBtn.onclick = () => { search.value = ''; applySearch(); };
 
@@ -192,32 +200,104 @@ function renderContent(content){
   }).join('\n');
 }
 
-async function loadMessages(dir, sid, title, el){
-  clearActive();
-  el.classList.add('active');
-  activeSessionEl = el;
-  crumb.textContent = title;
-  timeline.innerHTML = '<div class="empty">加载中…</div>';
-  const msgs = await (await fetch(`/api/projects/${dir}/sessions/${sid}/messages`)).json();
-  if (!msgs.length){ timeline.innerHTML = '<div class="empty">该 session 没有消息</div>'; return; }
-  timeline.innerHTML = '';
-  for (const m of msgs){
-    if (m.type === 'user' || m.type === 'assistant'){
-      const role = m.message?.role || m.type;
-      const el2 = document.createElement('div');
-      el2.className = `msg ${role}`;
-      const t = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
-      el2.innerHTML = `<div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span></div><div class="body">${renderContent(m.message?.content)}</div>`;
-      timeline.appendChild(el2);
-    } else if (m.type === 'tool_result' || m.toolUseResult){
-      const el2 = document.createElement('div');
-      el2.className = 'msg tool';
-      el2.innerHTML = `<div class="role">tool</div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div>`;
-      timeline.appendChild(el2);
+function appendLive(html){ const el = document.createElement('div'); el.innerHTML = html; const node = el.firstElementChild; if (node){ timeline.appendChild(node); timeline.scrollTop = timeline.scrollHeight; } return node; }
+
+function appendStreamEvent(ev){
+  if (ev.event === 'stream-json'){
+    const d = ev.data;
+    if (d?.type === 'assistant' && d.message?.content){
+      appendLive(`<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content)}</div></div>`);
+    } else if (d?.type === 'user' && d.message?.content){
+      appendLive(`<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content)}</div></div>`);
+    } else if (d?.type === 'result'){
+      appendLive(`<div class="msg live"><div class="role">result · live</div><div class="body">${esc(typeof d.result === 'string' ? d.result : JSON.stringify(d.result ?? ''))}</div></div>`);
+    } else if (d?.type !== 'system'){
+      appendLive(`<div class="msg live"><div class="role">${esc(d?.type ?? 'event')} · live</div></div>`);
+    }
+  } else if (ev.event === 'stderr'){
+    appendLive(`<div class="msg tool live"><div class="role">stderr · live</div><div class="body tool-result">${esc(ev.data?.text ?? '')}</div></div>`);
+  } else if (ev.event === 'exit'){
+    appendLive(`<div class="msg live"><div class="role">exit · live · code=${ev.data?.code}</div></div>`);
+  } else if (ev.event === 'error'){
+    appendLive(`<div class="msg tool live"><div class="role">error · live</div><div class="body tool-result">${esc(ev.data?.error ?? '')}</div></div>`);
+  }
+}
+
+function parseSSE(chunk){
+  let event = 'message', data = '';
+  for (const line of chunk.split('\n')){
+    if (line.startsWith('event: ')) event = line.slice(7);
+    else if (line.startsWith('data: ')) data += line.slice(6);
+  }
+  if (!data) return null;
+  try { return { event, data: JSON.parse(data) }; } catch { return { event, data: { text: data } }; }
+}
+
+async function streamRun(dir, sid, prompt, signal, onEvent){
+  const resp = await fetch(`/api/projects/${dir}/sessions/${sid}/run`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt }), signal,
+  });
+  if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;){
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1){
+      const ev = parseSSE(buf.slice(0, idx));
+      buf = buf.slice(idx + 2);
+      if (ev) onEvent(ev);
     }
   }
 }
 
+async function loadMessages(dir, sid, title, el){
+  clearActive();
+  el.classList.add('active'); activeSessionEl = el;
+  active = { dir, sid, title };
+  setComposerEnabled(true);
+  crumb.textContent = title;
+  timeline.innerHTML = '<div class="empty">加载中…</div>';
+  const msgs = await (await fetch(`/api/projects/${dir}/sessions/${sid}/messages`)).json();
+  timeline.innerHTML = '';
+  if (!msgs.length){ timeline.innerHTML = '<div class="empty">该 session 没有消息</div>'; return; }
+  for (const m of msgs){
+    if (m.type === 'user' || m.type === 'assistant'){
+      const role = m.message?.role || m.type;
+      const t = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
+      appendLiveRaw(`<div class="msg ${role}"><div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span></div><div class="body">${renderContent(m.message?.content)}</div></div>`);
+    } else if (m.type === 'tool_result' || m.toolUseResult){
+      appendLiveRaw(`<div class="msg tool"><div class="role">tool</div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div></div>`);
+    }
+  }
+  timeline.scrollTop = timeline.scrollHeight;
+}
+function appendLiveRaw(html){ const el = document.createElement('div'); el.innerHTML = html; if (el.firstElementChild) timeline.appendChild(el.firstElementChild); }
+
+async function sendPrompt(){
+  if (!active.dir || !active.sid) return;
+  const prompt = promptEl.value.trim();
+  if (!prompt) return;
+  if (!confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
+  promptEl.value = '';
+  sendBtn.disabled = true; stopBtn.hidden = false;
+  runningAC = new AbortController();
+  try {
+    await streamRun(active.dir, active.sid, prompt, runningAC.signal, appendStreamEvent);
+  } catch (e) {
+    if (e.name !== 'AbortError') appendStreamEvent({ event: 'error', data: { error: String(e) } });
+  } finally {
+    sendBtn.disabled = false; stopBtn.hidden = true; runningAC = null;
+  }
+}
+sendBtn.onclick = sendPrompt;
+stopBtn.onclick = () => runningAC?.abort();
+promptEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendPrompt(); });
+
+setComposerEnabled(false);
 loadProjects();
 </script>
 </body>

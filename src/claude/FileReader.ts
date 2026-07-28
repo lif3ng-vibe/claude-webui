@@ -161,6 +161,12 @@ export class ClaudeFileReader {
     }
   }
 
+  /** 该 session 的权威工作目录（从消息里的 `cwd` 字段读），用于续接时的子进程 cwd。 */
+  async getSessionCwd(dirName: string, sessionId: string): Promise<string | undefined> {
+    const msgs = await this.readSessionMessages(dirName, sessionId).catch(() => []);
+    return msgs.find((m) => m.cwd)?.cwd;
+  }
+
   /** 权威 cwd：该项目任意 session 中第一个带 `cwd` 字段的消息。 */
   private async readCwd(dirName: string, sessions: SessionEntry[]): Promise<string> {
     for (const s of sessions) {
