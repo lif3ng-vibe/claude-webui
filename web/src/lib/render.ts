@@ -43,8 +43,29 @@ export function fmtBytes(n: number): string {
   return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
 
-/** 渲染 session 消息内容块：text 走 markdown，tool_use/tool_result 用 <details> 折叠。 */
-export function renderContent(content: unknown): string {
+/** 在已渲染的 HTML 里高亮命中（只在标签之间的文本片段插入 <mark>，不破坏标签）。 */
+export function highlightInHtml(html: string, term: string): string {
+  if (!term) return html;
+  const ql = term.toLowerCase();
+  return html.replace(/>([^<]+)</g, (full: string, text: string) => {
+    const low = text.toLowerCase();
+    let out = '';
+    let i = 0;
+    for (;;) {
+      const idx = low.indexOf(ql, i);
+      if (idx === -1) {
+        out += text.slice(i);
+        break;
+      }
+      out += text.slice(i, idx);
+      out += `<mark>${text.slice(idx, idx + ql.length)}</mark>`;
+      i = idx + ql.length;
+    }
+    return `>${out}<`;
+  });
+}
+
+function contentBlocksHtml(content: unknown): string {
   if (typeof content === 'string') return renderMd(content);
   if (!Array.isArray(content)) return esc(JSON.stringify(content));
   return content
@@ -57,4 +78,17 @@ export function renderContent(content: unknown): string {
       return esc(JSON.stringify(b));
     })
     .join('\n');
+}
+
+/** 渲染 session 消息内容块（可选高亮命中 term）。 */
+export function renderContent(content: unknown, term = ''): string {
+  const html = contentBlocksHtml(content);
+  return term ? highlightInHtml(html, term) : html;
+}
+
+/** 渲染 tool 消息（可选高亮）。 */
+export function renderTool(toolUseResult: unknown, raw: unknown, term = ''): string {
+  const json = JSON.stringify(toolUseResult ?? raw, null, 2).slice(0, 2000);
+  const html = `<details><summary class="tool-result">↳ result</summary><pre>${esc(json)}</pre></details>`;
+  return term ? highlightInHtml(html, term) : html;
 }

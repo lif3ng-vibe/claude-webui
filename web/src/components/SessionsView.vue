@@ -5,7 +5,7 @@ import { refDebounced } from '@vueuse/core';
 import { NInput, NSpin, NEmpty } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
-import { renderContent, renderMd, hl, fmtBytes, esc } from '../lib/render';
+import { renderContent, renderTool, renderMd, hl, fmtBytes, esc } from '../lib/render';
 import { readSSE, type SSEEvent } from '../lib/sse';
 
 const store = useSessionStore();
@@ -222,13 +222,32 @@ function msgClass(m: (typeof messages.value)[number]): string {
 }
 
 // 只渲染有内容的消息，跳过 mode/permission-mode/file-history-snapshot/ai-title/system 等 meta 行
-const visibleMessages = computed(() =>
-  messages.value.filter((m) => {
-    if (m.type === 'user' || m.type === 'assistant') return m.message?.content != null && m.message.content !== '';
-    if (m.type === 'tool_result' || m.toolUseResult) return true;
-    return false;
-  }),
-);
+const msgSearch = ref('');
+const msgQ = refDebounced(msgSearch, 200);
+
+function messageText(m: (typeof messages.value)[number]): string {
+  let s = '';
+  const c = m.message?.content;
+  if (typeof c === 'string') s += c;
+  else if (Array.isArray(c))
+    for (const b of c as Array<{ type: string; text?: string; input?: unknown; content?: unknown }>) {
+      if (b.type === 'text') s += b.text ?? '';
+      else if (b.type === 'tool_use') s += JSON.stringify(b.input ?? {});
+      else if (b.type === 'tool_result') s += JSON.stringify(b.content ?? '');
+    }
+  if (m.toolUseResult) s += JSON.stringify(m.toolUseResult);
+  return s.toLowerCase();
+}
+
+const visibleMessages = computed(() => {
+  const term = msgQ.value.trim().toLowerCase();
+  return messages.value.filter((m) => {
+    const isContent = (m.type === 'user' || m.type === 'assistant' ? m.message?.content != null && m.message.content !== '' : m.type === 'tool_result' || !!m.toolUseResult);
+    if (!isContent) return false;
+    return !term || messageText(m).includes(term);
+  });
+});
+const totalMessages = computed(() => messages.value.filter((m) => m.type === 'user' || m.type === 'assistant' || m.type === 'tool_result' || m.toolUseResult).length);
 </script>
 
 <template>
@@ -271,6 +290,10 @@ const visibleMessages = computed(() =>
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
       </div>
+      <div v-if="store.sessionId" class="px-4 pb-2 flex items-center gap-2">
+        <NInput v-model:value="msgSearch" size="small" placeholder="搜索本 session 消息内容…" clearable class="flex-1" />
+        <span v-if="msgSearch.trim()" class="text-[11px] text-[#666] whitespace-nowrap">{{ visibleMessages.length }}/{{ totalMessages }}</span>
+      </div>
       <div ref="timelineRef" class="flex-1 min-h-0 overflow-auto px-4 pb-3">
         <div v-if="!store.sessionId" class="empty">选择一个 session 查看消息</div>
         <div v-else-if="messagesQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
@@ -286,16 +309,11 @@ const visibleMessages = computed(() =>
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
                 <button class="ask" @click="askStep(m)">🔍问</button>
               </div>
-              <div class="body" v-html="renderContent(m.message?.content)" />
+              <div class="body" v-html="renderContent(m.message?.content, msgQ)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
               <div class="role">tool<button class="ask" @click="askStep(m)">🔍问</button></div>
-              <div class="body">
-                <details>
-                  <summary class="tool-result">↳ result</summary>
-                  <pre>{{ JSON.stringify(m.toolUseResult ?? m.raw, null, 2).slice(0, 2000) }}</pre>
-                </details>
-              </div>
+              <div class="body" v-html="renderTool(m.toolUseResult, m.raw, msgQ)" />
             </template>
           </div>
         </template>
