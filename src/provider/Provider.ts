@@ -1,10 +1,10 @@
-/** provider 对话中的一条消息。 */
+/** provider 对话中的一条消息。system 角色应通过 systemPrompt 传，不放进 messages。 */
 export interface ProviderMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
-/** 模型可调用的工具（供"就 session 步骤提问"功能使用）。 */
+/** 模型可调用的工具（供“就 session 步骤提问”功能使用）。 */
 export interface ProviderTool {
   name: string;
   description: string;
@@ -21,6 +21,7 @@ export interface ProviderToolCall {
 /** provider 流的增量输出。 */
 export type ProviderStreamDelta =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
   | { type: 'tool_use'; toolCall: ProviderToolCall }
   | { type: 'done' }
   | { type: 'error'; error: string };

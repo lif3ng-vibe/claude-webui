@@ -6,8 +6,14 @@
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #1a1a1a; color: #ddd; }
-    .app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+    body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #1a1a1a; color: #ddd; }
+    .topnav { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; background: #1d1d1d; }
+    .topnav button { background: none; border: 1px solid transparent; color: #888; padding: 4px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+    .topnav button.active { color: #8ab4f8; border-color: #444; }
+    .topnav .model-info { margin-left: auto; font-size: 12px; color: #666; }
+    .view { flex: 1; min-height: 0; }
+    .hidden { display: none !important; }
+    .app { display: grid; grid-template-columns: 340px 1fr; height: 100%; }
     .sidebar { border-right: 1px solid #333; overflow: auto; }
     .sidebar-head { position: sticky; top: 0; background: #1a1a1a; padding: 8px; border-bottom: 1px solid #333; z-index: 1; }
     h1 { font-size: 15px; margin: 0 0 8px; color: #8ab4f8; }
@@ -39,6 +45,7 @@
     .msg .time { font-size: 11px; color: #666; margin-left: 8px; }
     .msg .body { white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
     .msg .body code { background: #111; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    .msg .thinking { font-size: 12px; color: #777; white-space: pre-wrap; border-left: 2px solid #333; padding-left: 8px; margin: 4px 0; max-height: 120px; overflow: auto; }
     .tool-call { color: #fbbc04; }
     .tool-result { color: #aaa; font-size: 12px; }
     .empty { color: #666; padding: 10px 8px; }
@@ -49,32 +56,121 @@
     .send { background: #8ab4f8; color: #1a1a1a; font-weight: 600; }
     .send:disabled { background: #444; color: #888; cursor: not-allowed; }
     .stop { background: #444; color: #ddd; }
-    .composer .hint { font-size: 11px; color: #fbbc04; }
+    /* chat view */
+    .chat-view { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+    .chat-presets { border-right: 1px solid #333; overflow: auto; padding: 10px; }
+    .chat-presets label { font-size: 12px; color: #888; }
+    .chat-presets select, .chat-presets textarea { width: 100%; margin-top: 6px; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 6px; font: inherit; }
+    .chat-presets textarea { min-height: 180px; resize: vertical; }
+    .preset-hint { font-size: 11px; color: #555; margin-top: 6px; }
+    .chat-main { display: flex; flex-direction: column; overflow: hidden; }
+    #chatTimeline { flex: 1; overflow: auto; padding: 12px 16px; }
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="sidebar">
-      <div class="sidebar-head">
-        <h1>Claude sessions</h1>
-        <input id="search" class="search" placeholder="搜索目录或 session…" autocomplete="off" />
-        <button id="collapseAll" class="collapse-all" hidden>全部收起</button>
+  <div class="topnav">
+    <button id="navSessions" class="active">Sessions</button>
+    <button id="navChat">Chat</button>
+    <span class="model-info" id="modelInfo"></span>
+  </div>
+
+  <!-- Sessions 视图 -->
+  <div id="sessionsView" class="view">
+    <div class="app">
+      <div class="sidebar">
+        <div class="sidebar-head">
+          <h1>Claude sessions</h1>
+          <input id="search" class="search" placeholder="搜索目录或 session…" autocomplete="off" />
+          <button id="collapseAll" class="collapse-all" hidden>全部收起</button>
+        </div>
+        <div id="tree"><div class="empty">加载中…</div></div>
       </div>
-      <div id="tree"><div class="empty">加载中…</div></div>
-    </div>
-    <div class="main">
-      <div class="head-bar">
-        <div class="crumb" id="crumb">选择左侧的工作目录</div>
-      </div>
-      <div id="timeline"></div>
-      <div class="composer">
-        <textarea id="prompt" placeholder="选择一个 session 后可发送指令…" disabled></textarea>
-        <button id="sendBtn" class="send" disabled>发送</button>
-        <button id="stopBtn" class="stop" hidden>停止</button>
+      <div class="main">
+        <div class="head-bar"><div class="crumb" id="crumb">选择左侧的工作目录</div></div>
+        <div id="timeline"></div>
+        <div class="composer">
+          <textarea id="prompt" placeholder="选择一个 session 后可发送指令…" disabled></textarea>
+          <button id="sendBtn" class="send" disabled>发送</button>
+          <button id="stopBtn" class="stop" hidden>停止</button>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- Chat 视图 -->
+  <div id="chatView" class="view chat-view hidden">
+    <div class="chat-presets">
+      <label>系统提示词</label>
+      <select id="presetSelect"><option value="">（不选预设）</option></select>
+      <textarea id="systemPrompt" placeholder="选择上方预设或自行编辑系统提示词…"></textarea>
+      <div class="preset-hint">预置提示词存于 ~/.claude-webui/prompts.json</div>
+    </div>
+    <div class="chat-main">
+      <div id="chatTimeline"><div class="empty">发一条消息开始对话…</div></div>
+      <div class="composer">
+        <textarea id="chatInput" placeholder="发消息…（Ctrl/Cmd+Enter 发送）"></textarea>
+        <button id="chatSend" class="send">发送</button>
+        <button id="chatStop" class="stop" hidden>停止</button>
+      </div>
+    </div>
+  </div>
+
 <script>
+// ============ 通用工具 ============
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function fmtBytes(n){ return n < 1024 ? n+' B' : n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB'; }
+function parseSSE(chunk){
+  let event = 'message', data = '';
+  for (const line of chunk.split('\n')){
+    if (line.startsWith('event: ')) event = line.slice(7);
+    else if (line.startsWith('data: ')) data += line.slice(6);
+  }
+  if (!data) return null;
+  try { return { event, data: JSON.parse(data) }; } catch { return { event, data: { text: data } }; }
+}
+async function readSSE(resp, onEvent){
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;){
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1){
+      const ev = parseSSE(buf.slice(0, idx));
+      buf = buf.slice(idx + 2);
+      if (ev) onEvent(ev);
+    }
+  }
+}
+function renderContent(content){
+  if (typeof content === 'string') return esc(content);
+  if (!Array.isArray(content)) return esc(JSON.stringify(content));
+  return content.map(b => {
+    if (b.type === 'text') return esc(b.text);
+    if (b.type === 'tool_use') return `<span class="tool-call">🔧 ${esc(b.name)}(${esc(JSON.stringify(b.input)).slice(0,200)})</span>`;
+    if (b.type === 'tool_result') return `<span class="tool-result">↳ ${esc(JSON.stringify(b.content)).slice(0,300)}</span>`;
+    return esc(JSON.stringify(b));
+  }).join('\n');
+}
+
+// ============ 视图切换 ============
+const sessionsView = document.getElementById('sessionsView');
+const chatView = document.getElementById('chatView');
+const navSessions = document.getElementById('navSessions');
+const navChat = document.getElementById('navChat');
+function showView(v){
+  const onSessions = v === 'sessions';
+  sessionsView.classList.toggle('hidden', !onSessions);
+  chatView.classList.toggle('hidden', onSessions);
+  navSessions.classList.toggle('active', onSessions);
+  navChat.classList.toggle('active', !onSessions);
+}
+navSessions.onclick = () => showView('sessions');
+navChat.onclick = () => showView('chat');
+
+// ============ Sessions 视图 ============
 const tree = document.getElementById('tree');
 const crumb = document.getElementById('crumb');
 const timeline = document.getElementById('timeline');
@@ -91,9 +187,6 @@ let active = { dir: null, sid: null, title: '' };
 let activeSessionEl = null;
 let runningAC = null;
 
-function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-function fmtBytes(n){ return n < 1024 ? n+' B' : n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB'; }
-
 function hl(text, q){
   if (!q) return esc(text);
   const low = text.toLowerCase(), ql = q.toLowerCase();
@@ -107,7 +200,6 @@ function hl(text, q){
   }
   return out;
 }
-
 function clearActive(){ if (activeSessionEl){ activeSessionEl.classList.remove('active'); activeSessionEl = null; } }
 function anyExpanded(){ return projectRows.some(({ sub }) => !sub.hidden); }
 function updateCollapseBtn(){ collapseAllBtn.hidden = !anyExpanded(); }
@@ -134,7 +226,6 @@ function renderSessions(dir, sub, q, filter){
     sub.appendChild(se);
   }
 }
-
 async function toggleProject(p, row, sub){
   const open = sub.hidden;
   if (open && !sessionsCache[p.dirName]) await fetchSessions(p.dirName);
@@ -142,16 +233,13 @@ async function toggleProject(p, row, sub){
   if (open) renderSessions(p.dirName, sub, search.value.trim().toLowerCase(), null);
   updateCollapseBtn();
 }
-
 async function loadProjects(){
   tree.innerHTML = '<div class="empty">加载中…</div>';
   projects = await (await fetch('/api/projects')).json();
-  tree.innerHTML = '';
-  projectRows.length = 0;
+  tree.innerHTML = ''; projectRows.length = 0;
   if (!projects.length){ tree.innerHTML = '<div class="empty">没有 session（~/.claude/projects 为空）</div>'; return; }
   for (const p of projects){
-    const row = document.createElement('div');
-    row.className = 'item project';
+    const row = document.createElement('div'); row.className = 'item project';
     const caret = document.createElement('span'); caret.className = 'caret'; caret.textContent = '▸';
     const title = document.createElement('span'); title.className = 'title';
     const cnt = document.createElement('span'); cnt.className = 'sub'; cnt.textContent = String(p.sessionCount);
@@ -164,13 +252,11 @@ async function loadProjects(){
   }
   updateCollapseBtn();
 }
-
 async function applySearch(){
   const q = search.value.trim().toLowerCase();
   if (!q){
     for (const r of projectRows){ paintProjectTitle(r.row, r.p, ''); r.row.style.display = ''; setExpanded(r.row, r.sub, false); }
-    updateCollapseBtn();
-    return;
+    updateCollapseBtn(); return;
   }
   await Promise.all(projects.map((p) => fetchSessions(p.dirName)));
   for (const { p, row, sub } of projectRows){
@@ -189,76 +275,21 @@ async function applySearch(){
 search.oninput = applySearch;
 collapseAllBtn.onclick = () => { search.value = ''; applySearch(); };
 
-function renderContent(content){
-  if (typeof content === 'string') return esc(content);
-  if (!Array.isArray(content)) return esc(JSON.stringify(content));
-  return content.map(b => {
-    if (b.type === 'text') return esc(b.text);
-    if (b.type === 'tool_use') return `<span class="tool-call">🔧 ${esc(b.name)}(${esc(JSON.stringify(b.input)).slice(0,200)})</span>`;
-    if (b.type === 'tool_result') return `<span class="tool-result">↳ ${esc(JSON.stringify(b.content)).slice(0,300)}</span>`;
-    return esc(JSON.stringify(b));
-  }).join('\n');
-}
-
-function appendLive(html){ const el = document.createElement('div'); el.innerHTML = html; const node = el.firstElementChild; if (node){ timeline.appendChild(node); timeline.scrollTop = timeline.scrollHeight; } return node; }
-
+function appendLive(html){ const el = document.createElement('div'); el.innerHTML = html; if (el.firstElementChild){ timeline.appendChild(el.firstElementChild); timeline.scrollTop = timeline.scrollHeight; } }
 function appendStreamEvent(ev){
   if (ev.event === 'stream-json'){
     const d = ev.data;
-    if (d?.type === 'assistant' && d.message?.content){
-      appendLive(`<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content)}</div></div>`);
-    } else if (d?.type === 'user' && d.message?.content){
-      appendLive(`<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content)}</div></div>`);
-    } else if (d?.type === 'result'){
-      appendLive(`<div class="msg live"><div class="role">result · live</div><div class="body">${esc(typeof d.result === 'string' ? d.result : JSON.stringify(d.result ?? ''))}</div></div>`);
-    } else if (d?.type !== 'system'){
-      appendLive(`<div class="msg live"><div class="role">${esc(d?.type ?? 'event')} · live</div></div>`);
-    }
-  } else if (ev.event === 'stderr'){
-    appendLive(`<div class="msg tool live"><div class="role">stderr · live</div><div class="body tool-result">${esc(ev.data?.text ?? '')}</div></div>`);
-  } else if (ev.event === 'exit'){
-    appendLive(`<div class="msg live"><div class="role">exit · live · code=${ev.data?.code}</div></div>`);
-  } else if (ev.event === 'error'){
-    appendLive(`<div class="msg tool live"><div class="role">error · live</div><div class="body tool-result">${esc(ev.data?.error ?? '')}</div></div>`);
-  }
+    if (d?.type === 'assistant' && d.message?.content) appendLive(`<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content)}</div></div>`);
+    else if (d?.type === 'user' && d.message?.content) appendLive(`<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content)}</div></div>`);
+    else if (d?.type === 'result') appendLive(`<div class="msg live"><div class="role">result · live</div><div class="body">${esc(typeof d.result === 'string' ? d.result : JSON.stringify(d.result ?? ''))}</div></div>`);
+    else if (d?.type !== 'system') appendLive(`<div class="msg live"><div class="role">${esc(d?.type ?? 'event')} · live</div></div>`);
+  } else if (ev.event === 'stderr') appendLive(`<div class="msg tool live"><div class="role">stderr · live</div><div class="body tool-result">${esc(ev.data?.text ?? '')}</div></div>`);
+  else if (ev.event === 'exit') appendLive(`<div class="msg live"><div class="role">exit · live · code=${ev.data?.code}</div></div>`);
+  else if (ev.event === 'error') appendLive(`<div class="msg tool live"><div class="role">error · live</div><div class="body tool-result">${esc(ev.data?.error ?? '')}</div></div>`);
 }
-
-function parseSSE(chunk){
-  let event = 'message', data = '';
-  for (const line of chunk.split('\n')){
-    if (line.startsWith('event: ')) event = line.slice(7);
-    else if (line.startsWith('data: ')) data += line.slice(6);
-  }
-  if (!data) return null;
-  try { return { event, data: JSON.parse(data) }; } catch { return { event, data: { text: data } }; }
-}
-
-async function streamRun(dir, sid, prompt, signal, onEvent){
-  const resp = await fetch(`/api/projects/${dir}/sessions/${sid}/run`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt }), signal,
-  });
-  if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let buf = '';
-  for (;;){
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) !== -1){
-      const ev = parseSSE(buf.slice(0, idx));
-      buf = buf.slice(idx + 2);
-      if (ev) onEvent(ev);
-    }
-  }
-}
-
 async function loadMessages(dir, sid, title, el){
-  clearActive();
-  el.classList.add('active'); activeSessionEl = el;
-  active = { dir, sid, title };
-  setComposerEnabled(true);
+  clearActive(); el.classList.add('active'); activeSessionEl = el;
+  active = { dir, sid, title }; setComposerEnabled(true);
   crumb.textContent = title;
   timeline.innerHTML = '<div class="empty">加载中…</div>';
   const msgs = await (await fetch(`/api/projects/${dir}/sessions/${sid}/messages`)).json();
@@ -268,37 +299,106 @@ async function loadMessages(dir, sid, title, el){
     if (m.type === 'user' || m.type === 'assistant'){
       const role = m.message?.role || m.type;
       const t = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
-      appendLiveRaw(`<div class="msg ${role}"><div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span></div><div class="body">${renderContent(m.message?.content)}</div></div>`);
+      const node = document.createElement('div'); node.className = `msg ${role}`;
+      node.innerHTML = `<div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span></div><div class="body">${renderContent(m.message?.content)}</div>`;
+      timeline.appendChild(node);
     } else if (m.type === 'tool_result' || m.toolUseResult){
-      appendLiveRaw(`<div class="msg tool"><div class="role">tool</div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div></div>`);
+      const node = document.createElement('div'); node.className = 'msg tool';
+      node.innerHTML = `<div class="role">tool</div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div>`;
+      timeline.appendChild(node);
     }
   }
   timeline.scrollTop = timeline.scrollHeight;
 }
-function appendLiveRaw(html){ const el = document.createElement('div'); el.innerHTML = html; if (el.firstElementChild) timeline.appendChild(el.firstElementChild); }
-
 async function sendPrompt(){
   if (!active.dir || !active.sid) return;
-  const prompt = promptEl.value.trim();
-  if (!prompt) return;
+  const prompt = promptEl.value.trim(); if (!prompt) return;
   if (!confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
-  promptEl.value = '';
-  sendBtn.disabled = true; stopBtn.hidden = false;
+  promptEl.value = ''; sendBtn.disabled = true; stopBtn.hidden = false;
   runningAC = new AbortController();
   try {
-    await streamRun(active.dir, active.sid, prompt, runningAC.signal, appendStreamEvent);
-  } catch (e) {
-    if (e.name !== 'AbortError') appendStreamEvent({ event: 'error', data: { error: String(e) } });
-  } finally {
-    sendBtn.disabled = false; stopBtn.hidden = true; runningAC = null;
-  }
+    const resp = await fetch(`/api/projects/${active.dir}/sessions/${active.sid}/run`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ prompt }), signal: runningAC.signal });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+    await readSSE(resp, appendStreamEvent);
+  } catch (e) { if (e.name !== 'AbortError') appendStreamEvent({ event:'error', data:{ error: String(e) } }); }
+  finally { sendBtn.disabled = false; stopBtn.hidden = true; runningAC = null; }
 }
 sendBtn.onclick = sendPrompt;
 stopBtn.onclick = () => runningAC?.abort();
 promptEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendPrompt(); });
-
 setComposerEnabled(false);
 loadProjects();
+
+// ============ Chat 视图 ============
+const chatTimeline = document.getElementById('chatTimeline');
+const chatInput = document.getElementById('chatInput');
+const chatSend = document.getElementById('chatSend');
+const chatStop = document.getElementById('chatStop');
+const presetSelect = document.getElementById('presetSelect');
+const systemPromptEl = document.getElementById('systemPrompt');
+const modelInfo = document.getElementById('modelInfo');
+
+let chatHistory = []; // {role, content}
+let chatAC = null;
+let promptsList = [];
+
+async function loadConfigUI(){
+  const c = await (await fetch('/api/config')).json();
+  modelInfo.textContent = c.hasAuth ? `${c.model} · ${c.baseURL}` : '未配置 API';
+}
+async function loadPromptsUI(){
+  promptsList = await (await fetch('/api/prompts')).json();
+  presetSelect.innerHTML = '<option value="">（不选预设）</option>';
+  for (const p of promptsList) presetSelect.add(new Option(p.title, p.id));
+}
+presetSelect.onchange = () => {
+  const p = promptsList.find((x) => x.id === presetSelect.value);
+  systemPromptEl.value = p ? p.text : '';
+};
+
+function renderChatMessage(role, content){
+  const node = document.createElement('div'); node.className = `msg ${role}`;
+  node.innerHTML = `<div class="role">${esc(role)}</div><div class="body">${esc(content)}</div>`;
+  chatTimeline.appendChild(node); chatTimeline.scrollTop = chatTimeline.scrollHeight;
+  return node;
+}
+function appendChatDelta(node, ev){
+  let body = node.querySelector('.body');
+  let thinking = node.querySelector('.thinking');
+  if (ev.event === 'thinking'){
+    if (!thinking){ thinking = document.createElement('div'); thinking.className = 'thinking'; node.insertBefore(thinking, body); }
+    thinking.textContent += ev.data?.text ?? '';
+  } else if (ev.event === 'text'){
+    body.textContent += ev.data?.text ?? '';
+  } else if (ev.event === 'error'){
+    body.textContent += `\n[error] ${ev.data?.error ?? ''}`;
+  }
+  chatTimeline.scrollTop = chatTimeline.scrollHeight;
+}
+async function sendChat(){
+  const text = chatInput.value.trim(); if (!text) return;
+  chatInput.value = ''; chatSend.disabled = true; chatStop.hidden = false;
+  chatHistory.push({ role: 'user', content: text });
+  renderChatMessage('user', text);
+  const node = renderChatMessage('assistant', '');
+  const sys = systemPromptEl.value.trim();
+  const ac = new AbortController(); chatAC = ac;
+  try {
+    const resp = await fetch('/api/chat', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ messages: chatHistory, systemPrompt: sys || undefined }), signal: ac.signal });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+    let got = '';
+    await readSSE(resp, (ev) => { appendChatDelta(node, ev); if (ev.event === 'text') got += ev.data?.text ?? ''; });
+    chatHistory.push({ role: 'assistant', content: got });
+  } catch (e) {
+    if (e.name !== 'AbortError') { node.querySelector('.body').textContent += `\n[error] ${String(e)}`; }
+  } finally { chatSend.disabled = false; chatStop.hidden = true; chatAC = null; }
+}
+chatSend.onclick = sendChat;
+chatStop.onclick = () => chatAC?.abort();
+chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendChat(); });
+
+loadConfigUI();
+loadPromptsUI();
 </script>
 </body>
 </html>

@@ -4,10 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { ClaudeFileReader } from '../claude/FileReader.js';
 import { ClaudeRunner } from '../claude/Runner.js';
+import { AnthropicProvider } from '../provider/AnthropicProvider.js';
+import type { ProviderMessage } from '../provider/Provider.js';
+import { providerConfig, publicConfig } from '../config.js';
+import { PromptsStore } from '../prompts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const reader = new ClaudeFileReader();
 const runner = new ClaudeRunner();
+const prompts = new PromptsStore();
 const PORT = Number(process.env.PORT) || 3000;
 const WEB_DIR = join(__dirname, '..', '..', 'web');
 
@@ -25,12 +30,27 @@ async function readBody(req: IncomingMessage): Promise<any> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
-async function handleRun(
-  req: IncomingMessage,
-  res: ServerResponse,
-  dirName: string,
-  sessionId: string,
-): Promise<void> {
+const SSE_HEADERS = {
+  'content-type': 'text/event-stream',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+};
+
+function sseWriter(res: ServerResponse, req: IncomingMessage) {
+  let clientGone = false;
+  req.on('close', () => { clientGone = true; });
+  const write = (chunk: string): void => {
+    if (clientGone) return;
+    try {
+      res.write(chunk);
+    } catch {
+      /* 客户端已断开 */
+    }
+  };
+  return write;
+}
+
+async function handleRun(req: IncomingMessage, res: ServerResponse, dirName: string, sessionId: string): Promise<void> {
   if (runningSessions.has(sessionId)) {
     json(res, 409, { error: '该 session 正在运行中，请等当前指令结束' });
     return;
@@ -49,30 +69,13 @@ async function handleRun(
 
   runningSessions.add(sessionId);
   const ac = new AbortController();
-  let clientGone = false;
-  req.on('close', () => {
-    clientGone = true;
-    ac.abort();
-  });
-
-  res.writeHead(200, {
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive',
-  });
-  const write = (chunk: string): void => {
-    if (clientGone) return;
-    try {
-      res.write(chunk);
-    } catch {
-      /* 客户端已断开 */
-    }
-  };
+  req.on('close', () => ac.abort());
+  res.writeHead(200, SSE_HEADERS);
+  const write = sseWriter(res, req);
 
   try {
     for await (const ev of runner.run({ sessionId, cwd, prompt, model: body.model, signal: ac.signal })) {
-      const payload =
-        ev.type === 'stream-json' ? ev.data : ev.type === 'stderr' ? { text: ev.text } : { code: ev.code };
+      const payload = ev.type === 'stream-json' ? ev.data : ev.type === 'stderr' ? { text: ev.text } : { code: ev.code };
       write(`event: ${ev.type}\n`);
       write(`data: ${JSON.stringify(payload)}\n\n`);
     }
@@ -81,6 +84,52 @@ async function handleRun(
     write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);
   } finally {
     runningSessions.delete(sessionId);
+    try {
+      if (!res.writableEnded) res.end();
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
+async function handleChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readBody(req);
+  const messages = Array.isArray(body.messages) ? body.messages as ProviderMessage[] : [];
+  if (!messages.length) {
+    json(res, 400, { error: 'messages 不能为空' });
+    return;
+  }
+  const cfg = await providerConfig();
+  if (!cfg.defaultModel) {
+    json(res, 400, { error: '未配置 model（设置 ANTHROPIC_MODEL 或 ~/.claude-webui/config.json）' });
+    return;
+  }
+  const provider = new AnthropicProvider(cfg);
+  const ac = new AbortController();
+  res.writeHead(200, SSE_HEADERS);
+  const write = sseWriter(res, req);
+  req.on('close', () => ac.abort());
+
+  try {
+    for await (const d of provider.stream({
+      model: body.model || cfg.defaultModel,
+      messages,
+      systemPrompt: typeof body.systemPrompt === 'string' ? body.systemPrompt : undefined,
+    })) {
+      const payload =
+        d.type === 'text' || d.type === 'thinking'
+          ? { text: d.text }
+          : d.type === 'tool_use'
+            ? { toolCall: d.toolCall }
+            : d.type === 'error'
+              ? { error: d.error }
+              : {};
+      write(`event: ${d.type}\n`);
+      write(`data: ${JSON.stringify(payload)}\n\n`);
+    }
+  } catch (e) {
+    write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);
+  } finally {
     try {
       if (!res.writableEnded) res.end();
     } catch {
@@ -98,6 +147,26 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(html);
     }
+
+    // —— 配置 ——
+    if (path === '/api/config' && req.method === 'GET') return json(res, 200, await publicConfig());
+
+    // —— 预置提示词 ——
+    if (path === '/api/prompts' && req.method === 'GET') return json(res, 200, await prompts.list());
+    if (path === '/api/prompts' && req.method === 'POST') {
+      const b = await readBody(req);
+      if (!b.id || !b.title || typeof b.text !== 'string') return json(res, 400, { error: '需要 id/title/text' });
+      return json(res, 200, await prompts.upsert({ id: String(b.id), title: String(b.title), text: String(b.text) }));
+    }
+    let pm: RegExpMatchArray | null;
+    if ((pm = path.match(/^\/api\/prompts\/([^/]+)$/)) && req.method === 'DELETE') {
+      return json(res, 200, await prompts.remove(decodeURIComponent(pm[1])));
+    }
+
+    // —— 对话 ——
+    if (path === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
+
+    // —— session 浏览 / 续接 ——
     if (path === '/api/projects' && req.method === 'GET') return json(res, 200, await reader.listProjects());
 
     let m: RegExpMatchArray | null;
@@ -110,6 +179,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     if ((m = path.match(/^\/api\/projects\/([^/]+)\/sessions\/([^/]+)\/run$/)) && req.method === 'POST') {
       return await handleRun(req, res, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     }
+
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
   } catch (e) {
