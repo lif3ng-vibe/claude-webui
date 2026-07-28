@@ -21,6 +21,47 @@ const runner = new ClaudeRunner();
 const prompts = new PromptsStore();
 const PORT = Number(process.env.PORT) || 3000;
 const WEB_DIR = join(__dirname, '..', '..', 'web');
+const DIST_DIR = join(WEB_DIR, 'dist');
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+const DEV_HINT =
+  '<!doctype html><meta charset="utf-8"><title>claude-webui</title>' +
+  '<body style="background:#1a1a1a;color:#ddd;font:14px/1.6 system-ui;padding:24px">' +
+  '<h2 style="color:#8ab4f8">前端未构建</h2>' +
+  '<p>开发模式：启动后端后，用前端 dev server <code>cd web && npm run dev</code> 打开 ' +
+  '<a style="color:#8ab4f8" href="http://localhost:5173">http://localhost:5173</a>。</p>' +
+  '<p>单进程模式：先 <code>cd web && npm run build</code>，再重启后端，访问本页。</p>' +
+  '</body>';
+
+async function serveDistFile(urlPath: string, res: ServerResponse): Promise<boolean> {
+  const filePath = join(DIST_DIR, urlPath);
+  const rel = relative(DIST_DIR, filePath);
+  if (rel && !rel.startsWith('..') && !isAbsolute(rel)) {
+    try {
+      const data = await readFile(filePath);
+      const ext = filePath.slice(filePath.lastIndexOf('.'));
+      res.writeHead(200, { 'content-type': MIME[ext] ?? 'application/octet-stream' });
+      res.end(data);
+      return true;
+    } catch {
+      /* 文件不存在 */
+    }
+  }
+  return false;
+}
 
 /** 正在运行的 session（按 sessionId 加锁，防止并发写同一 session 导致分叉）。 */
 const runningSessions = new Set<string>();
@@ -214,29 +255,26 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   const path = url.pathname;
   try {
     if (path === '/' && req.method === 'GET') {
-      const html = await readFile(join(WEB_DIR, 'index.html'), 'utf8');
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(html);
+      try {
+        const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(DEV_HINT);
+      }
     }
 
-    // 静态资源（web/ 下，如 /vendor/markdown-it.min.js）
+    // 静态资源（构建产物 web/dist）+ SPA fallback
     if (req.method === 'GET' && !path.startsWith('/api/')) {
-      const filePath = join(WEB_DIR, path);
-      const rel = relative(WEB_DIR, filePath);
-      if (rel && !rel.startsWith('..') && !isAbsolute(rel)) {
+      if (await serveDistFile(path, res)) return;
+      if (!path.includes('.', 1)) {
         try {
-          const data = await readFile(filePath);
-          const ct = path.endsWith('.js')
-            ? 'application/javascript; charset=utf-8'
-            : path.endsWith('.css')
-              ? 'text/css; charset=utf-8'
-              : path.endsWith('.svg')
-                ? 'image/svg+xml'
-                : 'application/octet-stream';
-          res.writeHead(200, { 'content-type': ct });
-          return res.end(data);
+          const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          return res.end(html);
         } catch {
-          /* 文件不存在，落到 404 */
+          /* dist 未构建，落到 404 */
         }
       }
     }

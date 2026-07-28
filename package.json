@@ -8,6 +8,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/server/index.ts",
+    "build:web": "npm --prefix web run build",
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsc -p tsconfig.json"
   },
