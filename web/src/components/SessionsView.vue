@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { refDebounced } from '@vueuse/core';
 import { NInput, NSpin, NEmpty } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
-import { renderContent, hl, fmtBytes } from '../lib/render';
+import { renderContent, hl, fmtBytes, esc } from '../lib/render';
+import { readSSE, type SSEEvent } from '../lib/sse';
 
 const store = useSessionStore();
 const search = ref('');
@@ -73,6 +74,7 @@ const tree = computed<TreeNode[]>(() => {
 });
 
 function selectSession(dir: string, s: SessionEntry): void {
+  live.value = [];
   store.select(dir, s.sessionId, s.preview || s.sessionId.slice(0, 8));
 }
 
@@ -81,8 +83,72 @@ function sessionSub(s: SessionEntry): string {
 }
 
 function refresh(): void {
+  live.value = [];
   void messagesQuery.refetch();
 }
+
+// —— 续接 session（CLI 包裹，SSE 流式 live 块）——
+const promptInput = ref('');
+const running = ref(false);
+const abortCtrl = ref<AbortController | null>(null);
+const live = ref<Array<{ id: number; html: string }>>([]);
+const timelineRef = ref<HTMLElement | null>(null);
+let liveId = 0;
+
+function appendStreamEvent(ev: SSEEvent): void {
+  let html = '';
+  if (ev.event === 'stream-json') {
+    const d = ev.data;
+    if (d?.type === 'assistant' && d.message?.content)
+      html = `<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content)}</div></div>`;
+    else if (d?.type === 'user' && d.message?.content)
+      html = `<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content)}</div></div>`;
+    else if (d?.type === 'result')
+      html = `<div class="msg live"><div class="role">result · live</div><div class="body">${esc(typeof d.result === 'string' ? d.result : JSON.stringify(d.result ?? ''))}</div></div>`;
+    else if (d?.type !== 'system')
+      html = `<div class="msg live"><div class="role">${esc(d?.type ?? 'event')} · live</div></div>`;
+  } else if (ev.event === 'stderr') {
+    html = `<div class="msg tool live"><div class="role">stderr · live</div><div class="body tool-result">${esc(ev.data?.text ?? '')}</div></div>`;
+  } else if (ev.event === 'exit') {
+    html = `<div class="msg live"><div class="role">exit · live · code=${ev.data?.code}</div></div>`;
+  } else if (ev.event === 'error') {
+    html = `<div class="msg tool live"><div class="role">error · live</div><div class="body tool-result">${esc(ev.data?.error ?? '')}</div></div>`;
+  }
+  if (html) live.value.push({ id: liveId++, html });
+}
+
+async function sendPrompt(): Promise<void> {
+  if (!store.dirName || !store.sessionId) return;
+  const prompt = promptInput.value.trim();
+  if (!prompt) return;
+  if (!confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
+  promptInput.value = '';
+  running.value = true;
+  abortCtrl.value = new AbortController();
+  try {
+    const resp = await fetch(`/api/projects/${store.dirName}/sessions/${store.sessionId}/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+      signal: abortCtrl.value.signal,
+    });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+    await readSSE(resp, appendStreamEvent);
+  } catch (e) {
+    if ((e as Error).name !== 'AbortError') appendStreamEvent({ event: 'error', data: { error: String(e) } });
+  } finally {
+    running.value = false;
+    abortCtrl.value = null;
+  }
+}
+
+watch(
+  () => live.value.length,
+  async () => {
+    await nextTick();
+    if (timelineRef.value) timelineRef.value.scrollTop = timelineRef.value.scrollHeight;
+  },
+);
 
 function msgRole(m: (typeof messages.value)[number]): string {
   return (m.message?.role as string) || m.type;
@@ -143,7 +209,7 @@ const visibleMessages = computed(() =>
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
       </div>
-      <div class="flex-1 min-h-0 overflow-auto px-4 pb-3">
+      <div ref="timelineRef" class="flex-1 min-h-0 overflow-auto px-4 pb-3">
         <div v-if="!store.sessionId" class="empty">选择一个 session 查看消息</div>
         <div v-else-if="messagesQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
         <template v-else>
@@ -170,6 +236,18 @@ const visibleMessages = computed(() =>
             </template>
           </div>
         </template>
+        <div v-for="l in live" :key="l.id" v-html="l.html"></div>
+      </div>
+      <div v-if="store.sessionId" class="composer">
+        <textarea
+          v-model="promptInput"
+          :disabled="running"
+          placeholder="向该 session 发送指令…（skip-permissions 运行 claude --resume，Ctrl/Cmd+Enter 发送）"
+          @keydown.ctrl.enter.prevent="sendPrompt"
+          @keydown.meta.enter.prevent="sendPrompt"
+        ></textarea>
+        <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt">发送</button>
+        <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
       </div>
     </main>
   </div>
