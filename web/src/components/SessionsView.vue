@@ -232,7 +232,7 @@ const visibleMessages = computed(() =>
 </script>
 
 <template>
-  <div class="h-screen grid grid-cols-[340px_1fr]">
+  <div class="h-full grid grid-cols-[340px_1fr]">
     <aside class="min-h-0 overflow-auto border-r border-[#333]">
       <div class="sticky top-0 bg-[#1a1a1a] p-2 border-b border-[#333] z-[1]">
         <div class="text-[#8ab4f8] text-[15px] mb-2">Claude sessions</div>

@@ -60,3 +60,10 @@ details > pre { margin: 4px 0 4px 14px; }
 .msg.study { border-color: #b388ff; }
 .study-q { color: #b388ff; font-size: 12px; margin: 2px 0; }
 .thinking { font-size: 12px; color: #777; white-space: pre-wrap; border-left: 2px solid #333; padding-left: 8px; margin: 4px 0; max-height: 120px; overflow: auto; }
+.topnav { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; background: #1d1d1d; }
+.topnav button { background: none; border: 1px solid transparent; color: #888; padding: 4px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+.topnav button.active { color: #8ab4f8; border-color: #444; }
+.topnav .model-info { margin-left: auto; font-size: 12px; color: #666; }
+.sys-prompt { width: 100%; margin-top: 6px; min-height: 180px; resize: vertical; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 6px; font: inherit; }
+.sys-prompt:focus { outline: none; border-color: #8ab4f8; }
+.preset-hint { font-size: 11px; color: #555; margin-top: 6px; }
