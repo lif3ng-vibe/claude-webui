@@ -15,7 +15,7 @@ body {
 .item .sub { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .caret { display: inline-block; width: 1em; color: #888; }
 .sub-tree { padding-left: 14px; }
-.project .title { font-weight: 500; }
+.project .title { font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
 .session .title { color: #c8c8c8; }
 mark { background: #5c4a1a; color: #ffd54f; border-radius: 2px; padding: 0 1px; }
 
