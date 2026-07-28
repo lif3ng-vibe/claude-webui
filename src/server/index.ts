@@ -8,6 +8,12 @@ import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
 import { providerConfig, publicConfig } from '../config.js';
 import { PromptsStore } from '../prompts.js';
+import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
+
+const STUDY_PROMPT =
+  '你是一个资深工程师。用户会给你 Claude Code session 里的某一步记录和一个问题。' +
+  '先用 read_file / list_files / grep 调查工作目录里的真实文件（也可读 ~/.claude 下的 session 记录），' +
+  '再给出准确、具体的回答。只读，不要尝试写文件。';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const reader = new ClaudeFileReader();
@@ -138,6 +144,71 @@ async function handleChat(req: IncomingMessage, res: ServerResponse): Promise<vo
   }
 }
 
+async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readBody(req);
+  const dirName = String(body.dirName ?? '');
+  const sessionId = String(body.sessionId ?? '');
+  const question = String(body.question ?? '');
+  if (!dirName || !sessionId || !question) {
+    json(res, 400, { error: '需要 dirName/sessionId/question' });
+    return;
+  }
+  const cwd = await reader.getSessionCwd(dirName, sessionId);
+  if (!cwd) {
+    json(res, 400, { error: '无法确定该 session 的工作目录' });
+    return;
+  }
+  const cfg = await providerConfig();
+  if (!cfg.defaultModel) {
+    json(res, 400, { error: '未配置 model' });
+    return;
+  }
+
+  const executor = createFsToolExecutor([cwd, reader.claudeHome()]);
+  const provider = new AnthropicProvider(cfg);
+  const stepText = JSON.stringify(body.step ?? null, null, 2).slice(0, 4000);
+  const userMessage =
+    `以下是 Claude Code session（工作目录 ${cwd}）里的某一步记录：\n\n${stepText}\n\n` +
+    `问题：${question}\n\n` +
+    `你可以使用 read_file / list_files / grep（根目录为该工作目录，也可读 ~/.claude）查阅真实文件后再回答。`;
+
+  const ac = new AbortController();
+  res.writeHead(200, SSE_HEADERS);
+  const write = sseWriter(res, req);
+  req.on('close', () => ac.abort());
+
+  try {
+    for await (const d of provider.stream({
+      model: body.model || cfg.defaultModel,
+      messages: [{ role: 'user', content: userMessage }],
+      systemPrompt: typeof body.systemPrompt === 'string' && body.systemPrompt ? body.systemPrompt : STUDY_PROMPT,
+      tools: FS_TOOLS,
+      executeTool: executor,
+    })) {
+      const payload =
+        d.type === 'text' || d.type === 'thinking'
+          ? { text: d.text }
+          : d.type === 'tool_use'
+            ? { toolCall: d.toolCall }
+            : d.type === 'tool_result'
+              ? { id: d.id, name: d.name, result: d.result }
+              : d.type === 'error'
+                ? { error: d.error }
+                : {};
+      write(`event: ${d.type}\n`);
+      write(`data: ${JSON.stringify(payload)}\n\n`);
+    }
+  } catch (e) {
+    write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);
+  } finally {
+    try {
+      if (!res.writableEnded) res.end();
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -165,6 +236,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
     // —— 对话 ——
     if (path === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
+    if (path === '/api/study' && req.method === 'POST') return await handleStudy(req, res);
 
     // —— session 浏览 / 续接 ——
     if (path === '/api/projects' && req.method === 'GET') return json(res, 200, await reader.listProjects());

@@ -23,6 +23,7 @@ export type ProviderStreamDelta =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; toolCall: ProviderToolCall }
+  | { type: 'tool_result'; id: string; name: string; result: string }
   | { type: 'done' }
   | { type: 'error'; error: string };
 
@@ -32,6 +33,8 @@ export interface ProviderRequest {
   messages: ProviderMessage[];
   systemPrompt?: string;
   tools?: ProviderTool[];
+  /** 执行模型发起的工具调用，返回结果文本。提供且 tools 非空时跑 agent 循环。 */
+  executeTool?: (toolCall: ProviderToolCall) => Promise<string>;
   // signal?: AbortSignal; // v2：流式中途取消
 }
 

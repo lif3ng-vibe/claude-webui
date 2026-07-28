@@ -48,6 +48,11 @@
     .msg .thinking { font-size: 12px; color: #777; white-space: pre-wrap; border-left: 2px solid #333; padding-left: 8px; margin: 4px 0; max-height: 120px; overflow: auto; }
     .tool-call { color: #fbbc04; }
     .tool-result { color: #aaa; font-size: 12px; }
+    .msg.study { border-color: #b388ff; }
+    .study-q { color: #b388ff; font-size: 12px; margin: 2px 0; }
+    .tools { margin: 4px 0; }
+    .ask { font-size: 11px; background: #2a2a2a; color: #b388ff; border: 1px solid #444; border-radius: 4px; padding: 1px 6px; cursor: pointer; margin-left: 6px; }
+    .ask:hover { background: #3a3a3a; }
     .empty { color: #666; padding: 10px 8px; }
     .composer { border-top: 1px solid #333; padding: 10px 16px; display: flex; gap: 8px; align-items: flex-end; background: #1d1d1d; }
     .composer textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 160px; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 8px; font: inherit; }
@@ -296,19 +301,64 @@ async function loadMessages(dir, sid, title, el){
   timeline.innerHTML = '';
   if (!msgs.length){ timeline.innerHTML = '<div class="empty">该 session 没有消息</div>'; return; }
   for (const m of msgs){
+    const node = document.createElement('div');
     if (m.type === 'user' || m.type === 'assistant'){
       const role = m.message?.role || m.type;
       const t = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
-      const node = document.createElement('div'); node.className = `msg ${role}`;
-      node.innerHTML = `<div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span></div><div class="body">${renderContent(m.message?.content)}</div>`;
-      timeline.appendChild(node);
+      node.className = `msg ${role}`;
+      node.innerHTML = `<div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span><button class="ask">🔍问</button></div><div class="body">${renderContent(m.message?.content)}</div>`;
     } else if (m.type === 'tool_result' || m.toolUseResult){
-      const node = document.createElement('div'); node.className = 'msg tool';
-      node.innerHTML = `<div class="role">tool</div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div>`;
-      timeline.appendChild(node);
+      node.className = 'msg tool';
+      node.innerHTML = `<div class="role">tool<button class="ask">🔍问</button></div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div>`;
+    } else {
+      continue; // 跳过 mode/permission-mode/file-history-snapshot 等
     }
+    const btn = node.querySelector('.ask');
+    if (btn) btn.onclick = () => askStep(m);
+    timeline.appendChild(node);
   }
   timeline.scrollTop = timeline.scrollHeight;
+}
+
+function askStep(step){
+  if (!active.dir || !active.sid){ alert('请先选择一个 session'); return; }
+  const q = prompt('向 LLM 提问这一步：');
+  if (!q) return;
+  studyStream(active.dir, active.sid, step, q);
+}
+
+async function studyStream(dir, sid, step, question){
+  const block = document.createElement('div');
+  block.className = 'msg study live';
+  block.innerHTML = `<div class="role">🔍 深问</div><div class="study-q">${esc(question)}</div><div class="thinking"></div><div class="tools"></div><div class="body"></div>`;
+  timeline.appendChild(block);
+  timeline.scrollTop = timeline.scrollHeight;
+  const thinkingEl = block.querySelector('.thinking');
+  const toolsEl = block.querySelector('.tools');
+  const bodyEl = block.querySelector('.body');
+  try {
+    const resp = await fetch('/api/study', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ dirName: dir, sessionId: sid, step, question }) });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+    await readSSE(resp, (ev) => {
+      if (ev.event === 'thinking') thinkingEl.textContent += ev.data?.text ?? '';
+      else if (ev.event === 'tool_use') {
+        const d = document.createElement('div'); d.className = 'tool-call';
+        d.textContent = `🔧 ${ev.data?.toolCall?.name}(${JSON.stringify(ev.data?.toolCall?.input ?? '').slice(1, 120)})`;
+        toolsEl.appendChild(d);
+      } else if (ev.event === 'tool_result') {
+        const d = document.createElement('div'); d.className = 'tool-result';
+        d.textContent = `↳ ${ev.data?.name}: ${String(ev.data?.result ?? '').slice(0, 300)}`;
+        toolsEl.appendChild(d);
+      } else if (ev.event === 'text') {
+        bodyEl.textContent += ev.data?.text ?? '';
+      } else if (ev.event === 'error') {
+        bodyEl.textContent += `\n[error] ${ev.data?.error ?? ''}`;
+      }
+      timeline.scrollTop = timeline.scrollHeight;
+    });
+  } catch (e) {
+    bodyEl.textContent += `\n[error] ${String(e)}`;
+  }
 }
 async function sendPrompt(){
   if (!active.dir || !active.sid) return;

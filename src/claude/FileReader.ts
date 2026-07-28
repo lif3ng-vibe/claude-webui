@@ -46,6 +46,11 @@ export interface SessionMessage {
 export class ClaudeFileReader {
   constructor(private readonly claudeDir: string = join(os.homedir(), '.claude')) {}
 
+  /** 该 reader 读取的 ~/.claude 根目录（供只读工具作用域使用）。 */
+  claudeHome(): string {
+    return this.claudeDir;
+  }
+
   projectsDir(): string {
     return join(this.claudeDir, 'projects');
   }
