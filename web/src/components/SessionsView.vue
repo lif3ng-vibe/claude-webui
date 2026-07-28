@@ -80,17 +80,36 @@ function sessionSub(s: SessionEntry): string {
   return `${new Date(s.mtimeMs).toLocaleString()} · ${fmtBytes(s.size)} · ${s.sessionId.slice(0, 8)}`;
 }
 
+function refresh(): void {
+  void messagesQuery.refetch();
+}
+
 function msgRole(m: (typeof messages.value)[number]): string {
   return (m.message?.role as string) || m.type;
 }
+
+function msgClass(m: (typeof messages.value)[number]): string {
+  if (m.type === 'tool_result' || m.toolUseResult) return 'tool';
+  return (m.message?.role as string) || m.type;
+}
+
+// 只渲染有内容的消息，跳过 mode/permission-mode/file-history-snapshot/ai-title/system 等 meta 行
+const visibleMessages = computed(() =>
+  messages.value.filter((m) => {
+    if (m.type === 'user' || m.type === 'assistant') return m.message?.content != null && m.message.content !== '';
+    if (m.type === 'tool_result' || m.toolUseResult) return true;
+    return false;
+  }),
+);
 </script>
 
 <template>
-  <div class="h-full grid grid-cols-[340px_1fr]">
-    <aside class="border-r border-[#333] overflow-auto">
+  <div class="h-screen grid grid-cols-[340px_1fr]">
+    <aside class="min-h-0 overflow-auto border-r border-[#333]">
       <div class="sticky top-0 bg-[#1a1a1a] p-2 border-b border-[#333] z-[1]">
         <div class="text-[#8ab4f8] text-[15px] mb-2">Claude sessions</div>
         <NInput v-model:value="search" placeholder="搜索目录或 session…" size="small" clearable />
+        <button v-if="expanded.size" class="collapse-all" @click="expanded = new Set()">全部收起</button>
       </div>
       <div class="p-2">
         <div v-if="projectsQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
@@ -119,18 +138,19 @@ function msgRole(m: (typeof messages.value)[number]): string {
       </div>
     </aside>
 
-    <main class="flex flex-col overflow-hidden">
-      <div class="px-4 pt-3">
-        <div class="text-[12px] text-[#888] mb-2">{{ store.title || '选择左侧的工作目录' }}</div>
+    <main class="min-h-0 flex flex-col overflow-hidden">
+      <div class="px-4 pt-3 pb-2 flex items-center gap-2">
+        <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
+        <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
       </div>
-      <div class="flex-1 overflow-auto px-4 pb-3">
+      <div class="flex-1 min-h-0 overflow-auto px-4 pb-3">
         <div v-if="!store.sessionId" class="empty">选择一个 session 查看消息</div>
         <div v-else-if="messagesQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
         <template v-else>
           <div
-            v-for="(m, i) in messages"
+            v-for="(m, i) in visibleMessages"
             :key="m.uuid || i"
-            :class="['msg', msgRole(m)]"
+            :class="['msg', msgClass(m)]"
           >
             <template v-if="m.type === 'user' || m.type === 'assistant'">
               <div class="role-row">

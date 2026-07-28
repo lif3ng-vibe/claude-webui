@@ -1,6 +1,15 @@
 import MarkdownIt from 'markdown-it';
+import { shikiReady, codeToHtml } from './shiki';
 
-const md = new MarkdownIt({ html: false, breaks: true, linkify: true });
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: true,
+  highlight(code, lang) {
+    void shikiReady.value; // 触发响应式依赖，Shiki 就绪后重渲染高亮
+    return codeToHtml(code, lang) ?? `<pre><code>${esc(code)}</code></pre>`;
+  },
+});
 
 export function renderMd(text: unknown): string {
   return md.render(String(text ?? ''));

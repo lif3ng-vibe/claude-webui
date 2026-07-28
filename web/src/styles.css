@@ -45,3 +45,7 @@ details { margin: 4px 0; }
 details > summary { cursor: pointer; color: #888; font-size: 12px; user-select: none; }
 details > pre { margin: 4px 0 4px 14px; }
 .empty { color: #666; padding: 10px 8px; }
+.collapse-all { margin-top: 6px; font-size: 12px; color: #8ab4f8; cursor: pointer; background: none; border: none; padding: 2px 0; }
+.collapse-all:hover { text-decoration: underline; }
+.ask { font-size: 11px; background: #2a2a2a; color: #b388ff; border: 1px solid #444; border-radius: 4px; padding: 1px 6px; cursor: pointer; }
+.ask:hover { background: #3a3a3a; }
