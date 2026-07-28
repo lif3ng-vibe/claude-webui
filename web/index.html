@@ -54,6 +54,19 @@
     .ask { font-size: 11px; background: #2a2a2a; color: #b388ff; border: 1px solid #444; border-radius: 4px; padding: 1px 6px; cursor: pointer; margin-left: 6px; }
     .ask:hover { background: #3a3a3a; }
     .empty { color: #666; padding: 10px 8px; }
+    /* markdown 渲染输出 */
+    .msg .body > *:first-child { margin-top: 0; }
+    .msg .body p { margin: 6px 0; }
+    .msg .body ul, .msg .body ol { margin: 6px 0; padding-left: 22px; }
+    .msg .body h1, .msg .body h2, .msg .body h3 { margin: 8px 0 4px; }
+    .msg .body a { color: #8ab4f8; }
+    .msg .body pre { background: #111; padding: 8px; border-radius: 6px; overflow: auto; margin: 6px 0; }
+    .msg .body pre code { background: none; padding: 0; font-size: 12px; }
+    .msg .body code { background: #111; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    .msg .body blockquote { border-left: 3px solid #444; margin: 6px 0; padding-left: 10px; color: #999; }
+    details { margin: 4px 0; }
+    details > summary { cursor: pointer; color: #888; font-size: 12px; user-select: none; }
+    details > pre { margin: 4px 0 4px 14px; }
     .composer { border-top: 1px solid #333; padding: 10px 16px; display: flex; gap: 8px; align-items: flex-end; background: #1d1d1d; }
     .composer textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 160px; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 8px; font: inherit; }
     .composer textarea:focus { outline: none; border-color: #8ab4f8; }
@@ -91,7 +104,7 @@
         <div id="tree"><div class="empty">加载中…</div></div>
       </div>
       <div class="main">
-        <div class="head-bar"><div class="crumb" id="crumb">选择左侧的工作目录</div></div>
+        <div class="head-bar"><div class="crumb" id="crumb">选择左侧的工作目录</div><button id="refreshBtn" class="ask" hidden>刷新</button></div>
         <div id="timeline"></div>
         <div class="composer">
           <textarea id="prompt" placeholder="选择一个 session 后可发送指令…" disabled></textarea>
@@ -120,6 +133,7 @@
     </div>
   </div>
 
+<script src="/vendor/markdown-it.min.js"></script>
 <script>
 // ============ 通用工具 ============
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
@@ -149,13 +163,21 @@ async function readSSE(resp, onEvent){
     }
   }
 }
+let _md = null;
+function renderMarkdown(text){
+  if (!_md && window.markdownit) _md = window.markdownit({ html: false, breaks: true, linkify: true });
+  const s = String(text ?? '');
+  return _md ? _md.render(s) : esc(s);
+}
 function renderContent(content){
-  if (typeof content === 'string') return esc(content);
+  if (typeof content === 'string') return renderMarkdown(content);
   if (!Array.isArray(content)) return esc(JSON.stringify(content));
   return content.map(b => {
-    if (b.type === 'text') return esc(b.text);
-    if (b.type === 'tool_use') return `<span class="tool-call">🔧 ${esc(b.name)}(${esc(JSON.stringify(b.input)).slice(0,200)})</span>`;
-    if (b.type === 'tool_result') return `<span class="tool-result">↳ ${esc(JSON.stringify(b.content)).slice(0,300)}</span>`;
+    if (b.type === 'text') return renderMarkdown(b.text);
+    if (b.type === 'tool_use')
+      return `<details><summary class="tool-call">🔧 ${esc(b.name)}</summary><pre>${esc(JSON.stringify(b.input ?? {}, null, 2))}</pre></details>`;
+    if (b.type === 'tool_result')
+      return `<details><summary class="tool-result">↳ result</summary><pre>${esc(String(b.content ?? '').slice(0, 2000))}</pre></details>`;
     return esc(JSON.stringify(b));
   }).join('\n');
 }
@@ -184,6 +206,7 @@ const collapseAllBtn = document.getElementById('collapseAll');
 const promptEl = document.getElementById('prompt');
 const sendBtn = document.getElementById('sendBtn');
 const stopBtn = document.getElementById('stopBtn');
+const refreshBtn = document.getElementById('refreshBtn');
 
 let projects = [];
 const sessionsCache = {};
@@ -294,7 +317,7 @@ function appendStreamEvent(ev){
 }
 async function loadMessages(dir, sid, title, el){
   clearActive(); el.classList.add('active'); activeSessionEl = el;
-  active = { dir, sid, title }; setComposerEnabled(true);
+  active = { dir, sid, title }; setComposerEnabled(true); refreshBtn.hidden = false;
   crumb.textContent = title;
   timeline.innerHTML = '<div class="empty">加载中…</div>';
   const msgs = await (await fetch(`/api/projects/${dir}/sessions/${sid}/messages`)).json();
@@ -309,7 +332,7 @@ async function loadMessages(dir, sid, title, el){
       node.innerHTML = `<div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span><button class="ask">🔍问</button></div><div class="body">${renderContent(m.message?.content)}</div>`;
     } else if (m.type === 'tool_result' || m.toolUseResult){
       node.className = 'msg tool';
-      node.innerHTML = `<div class="role">tool<button class="ask">🔍问</button></div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div>`;
+      node.innerHTML = `<div class="role">tool<button class="ask">🔍问</button></div><div class="body"><details><summary class="tool-result">↳ result</summary><pre>${esc(JSON.stringify(m.toolUseResult ?? m.raw, null, 2).slice(0, 2000))}</pre></details></div>`;
     } else {
       continue; // 跳过 mode/permission-mode/file-history-snapshot 等
     }
@@ -319,6 +342,7 @@ async function loadMessages(dir, sid, title, el){
   }
   timeline.scrollTop = timeline.scrollHeight;
 }
+refreshBtn.onclick = () => { if (active.dir && active.sid && activeSessionEl) loadMessages(active.dir, active.sid, active.title, activeSessionEl); };
 
 function askStep(step){
   if (!active.dir || !active.sid){ alert('请先选择一个 session'); return; }
@@ -336,6 +360,7 @@ async function studyStream(dir, sid, step, question){
   const thinkingEl = block.querySelector('.thinking');
   const toolsEl = block.querySelector('.tools');
   const bodyEl = block.querySelector('.body');
+  let got = '';
   try {
     const resp = await fetch('/api/study', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ dirName: dir, sessionId: sid, step, question }) });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
@@ -350,12 +375,13 @@ async function studyStream(dir, sid, step, question){
         d.textContent = `↳ ${ev.data?.name}: ${String(ev.data?.result ?? '').slice(0, 300)}`;
         toolsEl.appendChild(d);
       } else if (ev.event === 'text') {
-        bodyEl.textContent += ev.data?.text ?? '';
+        got += ev.data?.text ?? ''; bodyEl.textContent = got;
       } else if (ev.event === 'error') {
         bodyEl.textContent += `\n[error] ${ev.data?.error ?? ''}`;
       }
       timeline.scrollTop = timeline.scrollHeight;
     });
+    if (got) bodyEl.innerHTML = renderMarkdown(got);
   } catch (e) {
     bodyEl.textContent += `\n[error] ${String(e)}`;
   }
@@ -439,6 +465,7 @@ async function sendChat(){
     let got = '';
     await readSSE(resp, (ev) => { appendChatDelta(node, ev); if (ev.event === 'text') got += ev.data?.text ?? ''; });
     chatHistory.push({ role: 'assistant', content: got });
+    node.querySelector('.body').innerHTML = renderMarkdown(got);
   } catch (e) {
     if (e.name !== 'AbortError') { node.querySelector('.body').textContent += `\n[error] ${String(e)}`; }
   } finally { chatSend.disabled = false; chatStop.hidden = true; chatAC = null; }

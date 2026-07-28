@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, isAbsolute } from 'node:path';
 import { ClaudeFileReader } from '../claude/FileReader.js';
 import { ClaudeRunner } from '../claude/Runner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
@@ -217,6 +217,28 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       const html = await readFile(join(WEB_DIR, 'index.html'), 'utf8');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(html);
+    }
+
+    // 静态资源（web/ 下，如 /vendor/markdown-it.min.js）
+    if (req.method === 'GET' && !path.startsWith('/api/')) {
+      const filePath = join(WEB_DIR, path);
+      const rel = relative(WEB_DIR, filePath);
+      if (rel && !rel.startsWith('..') && !isAbsolute(rel)) {
+        try {
+          const data = await readFile(filePath);
+          const ct = path.endsWith('.js')
+            ? 'application/javascript; charset=utf-8'
+            : path.endsWith('.css')
+              ? 'text/css; charset=utf-8'
+              : path.endsWith('.svg')
+                ? 'image/svg+xml'
+                : 'application/octet-stream';
+          res.writeHead(200, { 'content-type': ct });
+          return res.end(data);
+        } catch {
+          /* 文件不存在，落到 404 */
+        }
+      }
     }
 
     // —— 配置 ——
