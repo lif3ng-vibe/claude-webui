@@ -87,10 +87,10 @@ tests/
 - `c4b9e01` session 步骤深问：`AnthropicProvider` agent 循环（executeTool 回调）+ `fsTools` 只读磁盘工具（read_file/list_files/grep，路径越界防护，作用域 = session cwd + `~/.claude`）+ `/api/study`（SSE）+ 前端每步“🔍问”按钮流式深问
 - `81b5937` 打磨：本地化 markdown-it（`web/vendor`，离线）+ 服务静态资源路由；assistant/对话/深问文本 markdown 渲染；tool_use/tool_result 用 `<details>` 折叠；session 视图“刷新”按钮
 - `5c60852` Vue 前端工具链：前端独立 `web/` 包（Vue 3 + Vite + TS + UnoCSS + VueUse + Naive UI + Pinia + @tanstack/vue-query + markdown-it + Shiki），Vite dev (5173) 代理 `/api` 到后端 3000；Sessions 读侧视图（浏览/搜索/markdown/折叠）已迁 Vue；**开发流变更：UI 用 http://localhost:5173，后端 3000 仅 API**
-- 28 测试通过（后端）；前端 vue-tsc 类型检查通过
+- `198fd1a`/`7ae812a`/`a840522`/`f587238` Vue 化全部交互：补读侧小功能（全部收起/刷新）+ Shiki 代码高亮；续接 session（composer + SSE live 块）；深问 🔍问（工具查证流式）；Chat 视图（Sessions/Chat 切换 + 预置提示词 + 系统提示词 + 流式对话 + model 信息）
+- 28 测试通过（后端）；前端 vue-tsc 类型检查通过；与原原生 HTML 功能对齐
 
 **下一步（顺序）：**
-1. Vue 化交互视图：续接（发指令流式）、深问（🔍问 + 工具查证流式）、Chat（对话 + 预置提示词），复用 `lib/sse.ts`
-2. Shiki 代码高亮接入（markdown-it highlight 或代码块组件，highlighter 已在 `lib/shiki.ts` 懒加载）
-3. 收尾：后端 `/` 改为 serve `web/dist`（构建产物）；README 写双进程开发/构建流程
-4. v2 项（见 Deferred）
+1. 收尾：后端 `/` 改为 serve `web/dist`（`vite build` 产物），单进程可跑；README 写双进程开发 + 单进程构建两种流程
+2. session 内消息内容搜索（当前仅目录/session 名称搜索）
+3. v2 项（见 Deferred）
