@@ -1,0 +1,47 @@
+:root { color-scheme: dark; }
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  background: #1a1a1a;
+  color: #ddd;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* 侧栏条目 */
+.item { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.item:hover { background: #2a2a2a; }
+.item.active { background: #2d3a5a; }
+.item .title { color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .sub { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.caret { display: inline-block; width: 1em; color: #888; }
+.sub-tree { padding-left: 14px; }
+.project .title { font-weight: 500; }
+.session .title { color: #c8c8c8; }
+mark { background: #5c4a1a; color: #ffd54f; border-radius: 2px; padding: 0 1px; }
+
+/* 消息 */
+.msg { border-left: 2px solid #444; padding: 6px 10px; margin: 6px 0; }
+.msg.user { border-color: #8ab4f8; }
+.msg.assistant { border-color: #34a853; }
+.msg.tool { border-color: #fbbc04; }
+.msg .role-row { display: flex; gap: 8px; }
+.msg .role { font-size: 11px; color: #888; text-transform: uppercase; }
+.msg .time { font-size: 11px; color: #666; }
+.msg .body { white-space: normal; word-break: break-word; margin-top: 2px; }
+
+/* markdown 输出 */
+.msg .body > *:first-child { margin-top: 0; }
+.msg .body p { margin: 6px 0; }
+.msg .body ul, .msg .body ol { margin: 6px 0; padding-left: 22px; }
+.msg .body h1, .msg .body h2, .msg .body h3 { margin: 8px 0 4px; }
+.msg .body a { color: #8ab4f8; }
+.msg .body pre { background: #111; padding: 8px; border-radius: 6px; overflow: auto; margin: 6px 0; }
+.msg .body pre code { background: none; padding: 0; font-size: 12px; }
+.msg .body code { background: #111; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.msg .body blockquote { border-left: 3px solid #444; margin: 6px 0; padding-left: 10px; color: #999; }
+.tool-call { color: #fbbc04; }
+.tool-result { color: #aaa; font-size: 12px; }
+details { margin: 4px 0; }
+details > summary { cursor: pointer; color: #888; font-size: 12px; user-select: none; }
+details > pre { margin: 4px 0 4px 14px; }
+.empty { color: #666; padding: 10px 8px; }

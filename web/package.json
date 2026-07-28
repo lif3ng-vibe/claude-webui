@@ -1,0 +1,29 @@
+{
+  "name": "claude-webui-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/vue-query": "^5.101.4",
+    "@vueuse/core": "^14.3.0",
+    "markdown-it": "^14.3.0",
+    "naive-ui": "^2.44.1",
+    "pinia": "^4.0.2",
+    "shiki": "^4.3.1",
+    "vue": "^3.5.40"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@unocss/vite": "^66.7.5",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "typescript": "~5.9",
+    "unocss": "^66.7.5",
+    "vite": "^8.1.5",
+    "vue-tsc": "^3.3.8"
+  }
+}
