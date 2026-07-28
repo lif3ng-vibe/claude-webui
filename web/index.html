@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>claude-webui</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #1a1a1a; color: #ddd; }
+    .app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+    .sidebar { border-right: 1px solid #333; overflow: auto; }
+    .sidebar-head { position: sticky; top: 0; background: #1a1a1a; padding: 8px; border-bottom: 1px solid #333; z-index: 1; }
+    h1 { font-size: 15px; margin: 0 0 8px; color: #8ab4f8; }
+    .search { width: 100%; padding: 6px 8px; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; font-size: 13px; }
+    .search:focus { outline: none; border-color: #8ab4f8; }
+    .collapse-all { margin-top: 6px; font-size: 12px; color: #8ab4f8; cursor: pointer; background: none; border: none; padding: 2px 0; }
+    .collapse-all:hover { text-decoration: underline; }
+    #tree { padding: 8px; }
+    .main { overflow: auto; padding: 16px; }
+    .crumb { font-size: 12px; color: #888; margin-bottom: 12px; }
+    .item { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+    .item:hover { background: #2a2a2a; }
+    .item.active { background: #2d3a5a; }
+    .item .title { color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item .sub { color: #888; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .caret { display: inline-block; width: 1em; color: #888; }
+    .sub-tree { padding-left: 14px; }
+    .project .title { font-weight: 500; }
+    .session .title { color: #c8c8c8; }
+    mark { background: #5c4a1a; color: #ffd54f; border-radius: 2px; padding: 0 1px; }
+    .msg { border-left: 2px solid #444; padding: 6px 10px; margin: 6px 0; }
+    .msg.user { border-color: #8ab4f8; }
+    .msg.assistant { border-color: #34a853; }
+    .msg.tool { border-color: #fbbc04; }
+    .msg .role { font-size: 11px; color: #888; text-transform: uppercase; }
+    .msg .time { font-size: 11px; color: #666; margin-left: 8px; }
+    .msg .body { white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+    .msg .body code { background: #111; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    .tool-call { color: #fbbc04; }
+    .tool-result { color: #aaa; font-size: 12px; }
+    .empty { color: #666; padding: 10px 8px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar">
+      <div class="sidebar-head">
+        <h1>Claude sessions</h1>
+        <input id="search" class="search" placeholder="搜索目录或 session…" autocomplete="off" />
+        <button id="collapseAll" class="collapse-all" hidden>全部收起</button>
+      </div>
+      <div id="tree"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="main">
+      <div class="crumb" id="crumb">选择左侧的工作目录</div>
+      <div id="timeline"></div>
+    </div>
+  </div>
+<script>
+const tree = document.getElementById('tree');
+const crumb = document.getElementById('crumb');
+const timeline = document.getElementById('timeline');
+const search = document.getElementById('search');
+const collapseAllBtn = document.getElementById('collapseAll');
+
+let projects = [];
+const sessionsCache = {};        // dirName -> SessionEntry[]
+const projectRows = [];          // { p, row, sub, caret, title }
+let activeSessionEl = null;
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function fmtBytes(n){ return n < 1024 ? n+' B' : n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB'; }
+
+// 转义并用 <mark> 高亮命中子串
+function hl(text, q){
+  if (!q) return esc(text);
+  const low = text.toLowerCase();
+  const ql = q.toLowerCase();
+  let out = '', i = 0;
+  for (;;){
+    const idx = low.indexOf(ql, i);
+    if (idx === -1){ out += esc(text.slice(i)); break; }
+    out += esc(text.slice(i, idx));
+    out += `<mark>${esc(text.slice(idx, idx + ql.length))}</mark>`;
+    i = idx + ql.length;
+  }
+  return out;
+}
+
+function clearActive(){ if (activeSessionEl){ activeSessionEl.classList.remove('active'); activeSessionEl = null; } }
+function anyExpanded(){ return projectRows.some(({ sub }) => !sub.hidden); }
+function updateCollapseBtn(){ collapseAllBtn.hidden = !anyExpanded(); }
+function setExpanded(row, sub, open){ sub.hidden = !open; row.querySelector('.caret').textContent = open ? '▾' : '▸'; }
+
+async function fetchSessions(dir){
+  if (!sessionsCache[dir]) sessionsCache[dir] = await (await fetch(`/api/projects/${dir}/sessions`)).json();
+  return sessionsCache[dir];
+}
+
+function paintProjectTitle(row, p, q){
+  row.querySelector('.title').innerHTML = hl(p.cwd, q);
+}
+
+function renderSessions(dir, sub, q, filter){
+  const sessions = sessionsCache[dir] || [];
+  sub.innerHTML = '';
+  if (!sessions.length){ sub.innerHTML = '<div class="empty">无 session</div>'; return; }
+  for (const s of sessions){
+    if (filter && !filter(s)) continue;
+    const se = document.createElement('div');
+    se.className = 'item session';
+    const title = s.preview || s.sessionId.slice(0, 8);
+    se.innerHTML = `<div class="title">${hl(title, q)}</div><div class="sub">${new Date(s.mtimeMs).toLocaleString()} · ${fmtBytes(s.size)} · ${esc(s.sessionId.slice(0,8))}</div>`;
+    se.onclick = (ev) => { ev.stopPropagation(); loadMessages(dir, s.sessionId, title, se); };
+    sub.appendChild(se);
+  }
+}
+
+async function toggleProject(p, row, sub){
+  const open = sub.hidden;
+  if (open && !sessionsCache[p.dirName]) await fetchSessions(p.dirName);
+  setExpanded(row, sub, open);
+  if (open) renderSessions(p.dirName, sub, search.value.trim().toLowerCase(), null);
+  updateCollapseBtn();
+}
+
+async function loadProjects(){
+  tree.innerHTML = '<div class="empty">加载中…</div>';
+  projects = await (await fetch('/api/projects')).json();
+  tree.innerHTML = '';
+  projectRows.length = 0;
+  if (!projects.length){ tree.innerHTML = '<div class="empty">没有 session（~/.claude/projects 为空）</div>'; return; }
+  for (const p of projects){
+    const row = document.createElement('div');
+    row.className = 'item project';
+    const caret = document.createElement('span'); caret.className = 'caret'; caret.textContent = '▸';
+    const title = document.createElement('span'); title.className = 'title';
+    const cnt = document.createElement('span'); cnt.className = 'sub'; cnt.textContent = String(p.sessionCount);
+    row.appendChild(caret); row.appendChild(title); row.appendChild(cnt);
+    paintProjectTitle(row, p, '');
+    const sub = document.createElement('div');
+    sub.className = 'sub-tree';
+    sub.hidden = true;
+    row.onclick = () => toggleProject(p, row, sub);
+    tree.appendChild(row);
+    tree.appendChild(sub);
+    projectRows.push({ p, row, sub });
+  }
+  updateCollapseBtn();
+}
+
+async function applySearch(){
+  const q = search.value.trim().toLowerCase();
+  if (!q){
+    for (const r of projectRows){ paintProjectTitle(r.row, r.p, ''); r.row.style.display = ''; setExpanded(r.row, r.sub, false); }
+    updateCollapseBtn();
+    return;
+  }
+  await Promise.all(projects.map((p) => fetchSessions(p.dirName)));
+  for (const { p, row, sub } of projectRows){
+    paintProjectTitle(row, p, q);
+    const dirMatch = p.cwd.toLowerCase().includes(q);
+    const sesMatch = (s) => (s.preview || '').toLowerCase().includes(q) || s.sessionId.toLowerCase().includes(q);
+    const matching = (sessionsCache[p.dirName] || []).filter(sesMatch);
+    if (dirMatch || matching.length){
+      row.style.display = '';
+      if (matching.length){
+        setExpanded(row, sub, true);
+        renderSessions(p.dirName, sub, q, sesMatch);  // 有命中 session：展开只显示命中
+      } else {
+        setExpanded(row, sub, false);                 // 目录命中但无 session 命中：不展开
+      }
+    } else {
+      row.style.display = 'none';
+      sub.hidden = true;
+    }
+  }
+  updateCollapseBtn();
+}
+
+search.oninput = applySearch;
+collapseAllBtn.onclick = () => { search.value = ''; applySearch(); };
+
+function renderContent(content){
+  if (typeof content === 'string') return esc(content);
+  if (!Array.isArray(content)) return esc(JSON.stringify(content));
+  return content.map(b => {
+    if (b.type === 'text') return esc(b.text);
+    if (b.type === 'tool_use') return `<span class="tool-call">🔧 ${esc(b.name)}(${esc(JSON.stringify(b.input)).slice(0,200)})</span>`;
+    if (b.type === 'tool_result') return `<span class="tool-result">↳ ${esc(JSON.stringify(b.content)).slice(0,300)}</span>`;
+    return esc(JSON.stringify(b));
+  }).join('\n');
+}
+
+async function loadMessages(dir, sid, title, el){
+  clearActive();
+  el.classList.add('active');
+  activeSessionEl = el;
+  crumb.textContent = title;
+  timeline.innerHTML = '<div class="empty">加载中…</div>';
+  const msgs = await (await fetch(`/api/projects/${dir}/sessions/${sid}/messages`)).json();
+  if (!msgs.length){ timeline.innerHTML = '<div class="empty">该 session 没有消息</div>'; return; }
+  timeline.innerHTML = '';
+  for (const m of msgs){
+    if (m.type === 'user' || m.type === 'assistant'){
+      const role = m.message?.role || m.type;
+      const el2 = document.createElement('div');
+      el2.className = `msg ${role}`;
+      const t = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
+      el2.innerHTML = `<div><span class="role">${esc(role)}</span><span class="time">${esc(t)}</span></div><div class="body">${renderContent(m.message?.content)}</div>`;
+      timeline.appendChild(el2);
+    } else if (m.type === 'tool_result' || m.toolUseResult){
+      const el2 = document.createElement('div');
+      el2.className = 'msg tool';
+      el2.innerHTML = `<div class="role">tool</div><div class="body tool-result">${esc(JSON.stringify(m.toolUseResult ?? m.raw).slice(0,500))}</div>`;
+      timeline.appendChild(el2);
+    }
+  }
+}
+
+loadProjects();
+</script>
+</body>
+</html>

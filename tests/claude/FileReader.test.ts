@@ -42,6 +42,7 @@ describe('ClaudeFileReader', () => {
     const sessions = await reader.listSessions(dirName);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].sessionId).toBe(sessionId);
+    expect(sessions[0].preview).toBe('hello'); // 首条人类 prompt 的预览
 
     const msgs = await reader.readSessionMessages(dirName, sessionId);
     expect(msgs).toHaveLength(1);

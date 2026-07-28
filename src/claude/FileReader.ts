@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import os from 'node:os';
 import { encodeCwd } from './pathEncoding.js';
@@ -18,6 +18,8 @@ export interface SessionEntry {
   dirName: string;
   mtimeMs: number;
   size: number;
+  /** 首条人类 prompt 的预览，用作可读标题（截断 ~120 字符）。 */
+  preview: string;
 }
 
 /** session jsonl 的一行。结构宽松，Claude Code 会写多种 `type`。 */
@@ -82,11 +84,13 @@ export class ClaudeFileReader {
       if (!f.endsWith('.jsonl')) continue;
       const filePath = join(dir, f);
       const s = await stat(filePath);
+      const sessionId = f.slice(0, -'.jsonl'.length);
       out.push({
-        sessionId: f.slice(0, -'.jsonl'.length),
+        sessionId,
         dirName,
         mtimeMs: s.mtimeMs,
         size: s.size,
+        preview: await this.readSessionPreview(dirName, sessionId),
       });
     }
     return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -117,6 +121,44 @@ export class ClaudeFileReader {
       }
     }
     return msgs;
+  }
+
+  /**
+   * 读取首条人类 prompt 的预览（用作 session 可读标题）。
+   * 只读文件前 256KB 以避免加载整条大 session；找不到则返回空串。
+   */
+  async readSessionPreview(dirName: string, sessionId: string, maxBytes = 262144): Promise<string> {
+    const filePath = join(this.projectsDir(), dirName, `${sessionId}.jsonl`);
+    let fh;
+    try {
+      fh = await open(filePath, 'r');
+      const buf = Buffer.alloc(maxBytes);
+      const { bytesRead } = await fh.read(buf, 0, maxBytes, 0);
+      const chunk = buf.subarray(0, bytesRead).toString('utf8');
+      for (const line of chunk.split(/\r?\n/)) {
+        if (!line) continue;
+        let raw: any;
+        try {
+          raw = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (raw.type !== 'user' || raw.message?.role !== 'user') continue;
+        const content = raw.message.content;
+        const preview =
+          typeof content === 'string'
+            ? content
+            : Array.isArray(content)
+              ? (content.find((b: any) => b.type === 'text')?.text ?? '')
+              : '';
+        if (preview) return preview.slice(0, 120);
+      }
+      return '';
+    } catch {
+      return '';
+    } finally {
+      await fh?.close();
+    }
   }
 
   /** 权威 cwd：该项目任意 session 中第一个带 `cwd` 字段的消息。 */
