@@ -85,9 +85,10 @@ tests/
 - `f8c0b52` 续接能力：`ClaudeRunner`（prompt 经 stdin 传入避免注入、Windows 需 `shell:true`）+ SSE `/run` 端点 + per-sessionId 锁 + 前端发指令流式显示
 - `7ee7443` provider 对话：`AnthropicProvider`（SDK 流式，text/thinking/tool_use/done/error，兼容 Anthropic 代理）+ `config`（env 优先、去 `[1m]` 后缀）+ `PromptsStore`（预置提示词库）+ `/api/config|prompts|chat` + 前端 Sessions/Chat 视图切换
 - `c4b9e01` session 步骤深问：`AnthropicProvider` agent 循环（executeTool 回调）+ `fsTools` 只读磁盘工具（read_file/list_files/grep，路径越界防护，作用域 = session cwd + `~/.claude`）+ `/api/study`（SSE）+ 前端每步“🔍问”按钮流式深问
+- `81b5937` 打磨：本地化 markdown-it（`web/vendor`，离线）+ 服务静态资源路由；assistant/对话/深问文本 markdown 渲染；tool_use/tool_result 用 `<details>` 折叠；session 视图“刷新”按钮
 - 28 测试通过；`npm run dev` 启服务在 http://localhost:3000
 
 **下一步（顺序）：**
-1. Vue 3 + Vite 前端：Naive UI + markdown-it + Shiki + @tanstack/vue-virtual + 自写消息/tool-call 组件 + Pinia/@tanstack/vue-query（替换当前原生 HTML 查看器）
-2. 打磨：续接后回读 jsonl 刷新、消息体折叠 tool-call/diff、消息内容搜索、markdown 代码高亮（当前为纯文本）
+1. Vue 3 + Vite 前端：Naive UI + markdown-it + Shiki + @tanstack/vue-virtual + 自写消息/tool-call 组件 + Pinia/@tanstack/vue-query（替换当前原生 HTML 查看器）；顺带 Shiki 代码高亮（当前代码块无高亮）
+2. session 内消息内容搜索（当前仅目录/session 名称搜索）
 3. v2 项（见 Deferred）
