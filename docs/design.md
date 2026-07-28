@@ -91,7 +91,9 @@ tests/
 - `e115689` `.project` 标题任意折行
 - 收尾：后端 `/` 与静态资源改为 serve `web/dist`（构建产物）+ SPA fallback，未构建时返回开发提示；根 `npm run build:web`；README 写双进程开发与单进程构建两种流程
 - `3ff2b43` session 内消息内容搜索：时间线头部搜索框过滤消息 + 命中高亮（标签间文本插入，不破坏 markdown）+ N/M 计数
-- 28 测试通过（后端）；前端 vue-tsc 类型检查通过；与原原生 HTML 功能对齐并扩展
+- `1772dda` 多 provider 配置：`providers` 数组 + active + env 内置兜底；⚙️ 设置弹窗管理 provider（增删改/设活动），Chat 选 provider；GET/PUT `/api/config` 持久化，密钥不回传
+- 29 测试通过（后端）；前端 vue-tsc 类型检查通过；与原原生 HTML 功能对齐并扩展
 
 **下一步：**
-- v2 项（见 Deferred，动手前先回来和用户确认）：多 provider 跨家对比、磁盘写入、常驻 B 执行模型 + WS、SQLite、memory/stats/history 视图。
+- 多 provider 跨家对比的剩余部分：tool-use（深问）跨家仍只 Anthropic 兼容（格式差异），需 adapter 适配；纯对话多 provider 已可用。
+- 其余 v2 项（见 Deferred，动手前先回来和用户确认）：磁盘写入、常驻 B 执行模型 + WS、SQLite、memory/stats/history 视图。
