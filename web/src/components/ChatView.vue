@@ -5,12 +5,26 @@ import { NSelect } from 'naive-ui';
 import { api } from '../api';
 import { renderMd } from '../lib/render';
 import { readSSE } from '../lib/sse';
+import { useConfig } from '../composables/useConfig';
 
 const promptsQuery = useQuery({ queryKey: ['prompts'], queryFn: api.prompts });
 const prompts = computed(() => promptsQuery.data.value ?? []);
 const presetOptions = computed(() => prompts.value.map((p) => ({ label: p.title, value: p.id })));
 const selectedPreset = ref<string | null>(null);
 const systemPrompt = ref('');
+
+const config = useConfig();
+const providerOptions = computed(() =>
+  (config.data.value?.providers ?? []).map((p) => ({ label: `${p.name}${p.isEnv ? ' (env)' : ''}`, value: p.id })),
+);
+const selectedProviderId = ref<string>('');
+watch(
+  () => config.data.value,
+  (c) => {
+    if (c && !selectedProviderId.value) selectedProviderId.value = c.activeProviderId;
+  },
+  { immediate: true },
+);
 
 const chatInput = ref('');
 const sending = ref(false);
@@ -60,7 +74,7 @@ async function sendChat(): Promise<void> {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages, systemPrompt: systemPrompt.value.trim() || undefined }),
+      body: JSON.stringify({ messages, systemPrompt: systemPrompt.value.trim() || undefined, providerId: selectedProviderId.value }),
       signal: chatAbort.value.signal,
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
@@ -84,6 +98,8 @@ async function sendChat(): Promise<void> {
 <template>
   <div class="h-full grid grid-cols-[300px_1fr]">
     <aside class="min-h-0 overflow-auto border-r border-[#333] p-2.5">
+      <div class="text-[12px] text-[#888]">Provider</div>
+      <NSelect v-model:value="selectedProviderId" :options="providerOptions" size="small" class="mb-2.5" placeholder="选择 provider" />
       <div class="text-[12px] text-[#888]">系统提示词</div>
       <NSelect
         :value="selectedPreset"

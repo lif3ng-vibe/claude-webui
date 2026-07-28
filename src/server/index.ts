@@ -6,7 +6,7 @@ import { ClaudeFileReader } from '../claude/FileReader.js';
 import { ClaudeRunner } from '../claude/Runner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
-import { providerConfig, publicConfig } from '../config.js';
+import { resolveProvider, publicConfig, saveProviders } from '../config.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 
@@ -146,9 +146,9 @@ async function handleChat(req: IncomingMessage, res: ServerResponse): Promise<vo
     json(res, 400, { error: 'messages 不能为空' });
     return;
   }
-  const cfg = await providerConfig();
+  const cfg = await resolveProvider(body.providerId);
   if (!cfg.defaultModel) {
-    json(res, 400, { error: '未配置 model（设置 ANTHROPIC_MODEL 或 ~/.claude-webui/config.json）' });
+    json(res, 400, { error: '未配置 model（在设置里配置 provider，或设 ANTHROPIC_MODEL）' });
     return;
   }
   const provider = new AnthropicProvider(cfg);
@@ -199,7 +199,7 @@ async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<v
     json(res, 400, { error: '无法确定该 session 的工作目录' });
     return;
   }
-  const cfg = await providerConfig();
+  const cfg = await resolveProvider(body.providerId);
   if (!cfg.defaultModel) {
     json(res, 400, { error: '未配置 model' });
     return;
@@ -281,6 +281,12 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
     // —— 配置 ——
     if (path === '/api/config' && req.method === 'GET') return json(res, 200, await publicConfig());
+    if (path === '/api/config' && req.method === 'PUT') {
+      const b = await readBody(req);
+      const providers = Array.isArray(b.providers) ? b.providers : [];
+      await saveProviders(providers, String(b.activeProviderId ?? ''));
+      return json(res, 200, await publicConfig());
+    }
 
     // —— 预置提示词 ——
     if (path === '/api/prompts' && req.method === 'GET') return json(res, 200, await prompts.list());

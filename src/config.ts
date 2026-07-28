@@ -9,36 +9,34 @@ export function configDir(): string {
 
 const configPath = (): string => join(configDir(), 'config.json');
 
+/** 一个 provider 配置（含密钥，后端用）。 */
+export interface ProviderConfig {
+  id: string;
+  name: string;
+  baseURL: string;
+  authToken?: string;
+  apiKey?: string;
+  model: string;
+}
+
 export interface AppConfig {
+  providers?: ProviderConfig[];
+  activeProviderId?: string;
+  maxTokens?: number;
+  // 旧字段（兼容/兜底）
   anthropicApiKey?: string;
   anthropicAuthToken?: string;
   anthropicBaseURL?: string;
   model?: string;
-  maxTokens?: number;
 }
 
-/** 读取配置：环境变量优先于配置文件。 */
+/** 读取配置文件（不含 env 兜底，env 在解析时单独处理）。 */
 export async function loadConfig(): Promise<AppConfig> {
-  let file: AppConfig = {};
   try {
-    file = JSON.parse(await readFile(configPath(), 'utf8'));
+    return JSON.parse(await readFile(configPath(), 'utf8'));
   } catch {
-    /* 无配置文件 */
+    return {};
   }
-  return {
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY || file.anthropicApiKey,
-    anthropicAuthToken: process.env.ANTHROPIC_AUTH_TOKEN || file.anthropicAuthToken,
-    anthropicBaseURL: process.env.ANTHROPIC_BASE_URL || file.anthropicBaseURL,
-    model: process.env.ANTHROPIC_MODEL || file.model,
-    maxTokens: file.maxTokens,
-  };
-}
-
-export async function saveConfig(patch: AppConfig): Promise<AppConfig> {
-  await mkdir(configDir(), { recursive: true });
-  const next = { ...(await loadConfig()), ...patch };
-  await writeFile(configPath(), JSON.stringify(next, null, 2), 'utf8');
-  return next;
 }
 
 /** 去掉 Claude Code 的 [1m] 之类上下文窗口后缀——代理不认。 */
@@ -46,8 +44,53 @@ export function stripModelSuffix(m: string): string {
   return m.replace(/\[.*\]$/, '');
 }
 
-/** 给 AnthropicProvider 用的配置（model 已去后缀）。 */
-export async function providerConfig(): Promise<{
+/** 由环境变量构成的内置 provider（不写入文件，只读、不可删）。 */
+function envProvider(): ProviderConfig | null {
+  const baseURL = process.env.ANTHROPIC_BASE_URL;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const model = process.env.ANTHROPIC_MODEL;
+  if (!baseURL && !authToken && !apiKey && !model) return null;
+  return { id: 'env', name: '默认 (env)', baseURL: baseURL || '', authToken, apiKey, model: model || '' };
+}
+
+/** 不含密钥的 provider，供前端展示。 */
+export interface PublicProvider {
+  id: string;
+  name: string;
+  baseURL: string;
+  model: string;
+  hasAuth: boolean;
+  isEnv?: boolean;
+}
+
+export async function publicConfig(): Promise<{ providers: PublicProvider[]; activeProviderId: string }> {
+  const c = await loadConfig();
+  const saved = c.providers ?? [];
+  const list: PublicProvider[] = [];
+  const env = envProvider();
+  if (env) list.push({ id: 'env', name: env.name, baseURL: env.baseURL, model: stripModelSuffix(env.model), hasAuth: Boolean(env.authToken || env.apiKey), isEnv: true });
+  for (const p of saved) list.push({ id: p.id, name: p.name, baseURL: p.baseURL, model: stripModelSuffix(p.model), hasAuth: Boolean(p.authToken || p.apiKey) });
+  const active = c.activeProviderId && list.some((p) => p.id === c.activeProviderId) ? c.activeProviderId : (list[0]?.id ?? '');
+  return { providers: list, activeProviderId: active };
+}
+
+/** 保存 providers（密钥留空时保留已有值）+ activeProviderId。 */
+export async function saveProviders(providers: ProviderConfig[], activeProviderId: string): Promise<void> {
+  const cur = await loadConfig();
+  const old = new Map((cur.providers ?? []).map((p) => [p.id, p]));
+  const merged = providers.map((p) => ({
+    ...p,
+    authToken: p.authToken || old.get(p.id)?.authToken,
+    apiKey: p.apiKey || old.get(p.id)?.apiKey,
+  }));
+  const next: AppConfig = { ...cur, providers: merged, activeProviderId };
+  await mkdir(configDir(), { recursive: true });
+  await writeFile(configPath(), JSON.stringify(next, null, 2), 'utf8');
+}
+
+/** 解析某 provider（或 active/env 兜底）为 AnthropicProvider 所需配置。 */
+export async function resolveProvider(id?: string): Promise<{
   apiKey?: string;
   authToken?: string;
   baseURL?: string;
@@ -55,25 +98,18 @@ export async function providerConfig(): Promise<{
   maxTokens?: number;
 }> {
   const c = await loadConfig();
+  const maxTokens = c.maxTokens;
+  if (id && id !== 'env') {
+    const p = (c.providers ?? []).find((x) => x.id === id);
+    if (p) return { apiKey: p.apiKey, authToken: p.authToken, baseURL: p.baseURL, defaultModel: stripModelSuffix(p.model), maxTokens };
+  }
+  const env = envProvider();
+  if (env) return { apiKey: env.apiKey, authToken: env.authToken, baseURL: env.baseURL, defaultModel: stripModelSuffix(env.model), maxTokens };
   return {
-    apiKey: c.anthropicApiKey,
-    authToken: c.anthropicAuthToken,
-    baseURL: c.anthropicBaseURL,
-    defaultModel: c.model ? stripModelSuffix(c.model) : '',
-    maxTokens: c.maxTokens,
-  };
-}
-
-/** 不含密钥的配置，供前端展示。 */
-export async function publicConfig(): Promise<{
-  model: string;
-  baseURL: string;
-  hasAuth: boolean;
-}> {
-  const c = await loadConfig();
-  return {
-    model: c.model ? stripModelSuffix(c.model) : '',
-    baseURL: c.anthropicBaseURL ?? '',
-    hasAuth: Boolean(c.anthropicApiKey || c.anthropicAuthToken),
+    apiKey: process.env.ANTHROPIC_API_KEY || c.anthropicApiKey,
+    authToken: process.env.ANTHROPIC_AUTH_TOKEN || c.anthropicAuthToken,
+    baseURL: process.env.ANTHROPIC_BASE_URL || c.anthropicBaseURL,
+    defaultModel: stripModelSuffix(process.env.ANTHROPIC_MODEL || c.model || ''),
+    maxTokens,
   };
 }

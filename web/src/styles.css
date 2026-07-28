@@ -67,3 +67,5 @@ details > pre { margin: 4px 0 4px 14px; }
 .sys-prompt { width: 100%; margin-top: 6px; min-height: 180px; resize: vertical; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 6px; font: inherit; }
 .sys-prompt:focus { outline: none; border-color: #8ab4f8; }
 .preset-hint { font-size: 11px; color: #555; margin-top: 6px; }
+.settings-btn { background: none; border: 1px solid #444; color: #888; padding: 3px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-left: 8px; }
+.settings-btn:hover { color: #8ab4f8; }
