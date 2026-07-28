@@ -5,7 +5,7 @@ import { refDebounced } from '@vueuse/core';
 import { NInput, NSpin, NEmpty } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
-import { renderContent, hl, fmtBytes, esc } from '../lib/render';
+import { renderContent, renderMd, hl, fmtBytes, esc } from '../lib/render';
 import { readSSE, type SSEEvent } from '../lib/sse';
 
 const store = useSessionStore();
@@ -75,6 +75,7 @@ const tree = computed<TreeNode[]>(() => {
 
 function selectSession(dir: string, s: SessionEntry): void {
   live.value = [];
+  studyBlocks.value = [];
   store.select(dir, s.sessionId, s.preview || s.sessionId.slice(0, 8));
 }
 
@@ -84,6 +85,7 @@ function sessionSub(s: SessionEntry): string {
 
 function refresh(): void {
   live.value = [];
+  studyBlocks.value = [];
   void messagesQuery.refetch();
 }
 
@@ -94,6 +96,19 @@ const abortCtrl = ref<AbortController | null>(null);
 const live = ref<Array<{ id: number; html: string }>>([]);
 const timelineRef = ref<HTMLElement | null>(null);
 let liveId = 0;
+const scrollTick = ref(0);
+
+interface StudyBlock {
+  id: number;
+  question: string;
+  thinking: string;
+  tools: { id: number; html: string }[];
+  bodyText: string;
+  bodyHtml: string;
+}
+const studyBlocks = ref<StudyBlock[]>([]);
+let studyId = 0;
+let toolId = 0;
 
 function appendStreamEvent(ev: SSEEvent): void {
   let html = '';
@@ -114,7 +129,10 @@ function appendStreamEvent(ev: SSEEvent): void {
   } else if (ev.event === 'error') {
     html = `<div class="msg tool live"><div class="role">error · live</div><div class="body tool-result">${esc(ev.data?.error ?? '')}</div></div>`;
   }
-  if (html) live.value.push({ id: liveId++, html });
+  if (html) {
+    live.value.push({ id: liveId++, html });
+    scrollTick.value++;
+  }
 }
 
 async function sendPrompt(): Promise<void> {
@@ -142,8 +160,52 @@ async function sendPrompt(): Promise<void> {
   }
 }
 
+// —— 深问：就某一步向 LLM 提问 + 只读磁盘工具查证 ——
+function stepPayload(m: (typeof messages.value)[number]): unknown {
+  const { raw: _raw, ...rest } = m;
+  return rest;
+}
+
+function askStep(m: (typeof messages.value)[number]): void {
+  if (!store.dirName || !store.sessionId) {
+    alert('请先选择一个 session');
+    return;
+  }
+  const question = prompt('向 LLM 提问这一步：');
+  if (!question) return;
+  void studyStream(store.dirName, store.sessionId, stepPayload(m), question);
+}
+
+async function studyStream(dir: string, sid: string, step: unknown, question: string): Promise<void> {
+  studyBlocks.value.push({ id: studyId, question, thinking: '', tools: [], bodyText: '', bodyHtml: '' });
+  const b = studyBlocks.value[studyBlocks.value.length - 1];
+  studyId++;
+  scrollTick.value++;
+  try {
+    const resp = await fetch('/api/study', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dirName: dir, sessionId: sid, step, question }),
+    });
+    if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+    await readSSE(resp, (ev) => {
+      if (ev.event === 'thinking') b.thinking += ev.data?.text ?? '';
+      else if (ev.event === 'tool_use')
+        b.tools.push({ id: toolId++, html: `<div class="tool-call">🔧 ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
+      else if (ev.event === 'tool_result')
+        b.tools.push({ id: toolId++, html: `<div class="tool-result">↳ ${esc(ev.data?.name)}: ${esc(String(ev.data?.result ?? '')).slice(0, 300)}</div>` });
+      else if (ev.event === 'text') b.bodyText += ev.data?.text ?? '';
+      else if (ev.event === 'error') b.bodyText += `\n[error] ${ev.data?.error ?? ''}`;
+      scrollTick.value++;
+    });
+    if (b.bodyText) b.bodyHtml = renderMd(b.bodyText);
+  } catch (e) {
+    b.bodyText += `\n[error] ${String(e)}`;
+  }
+}
+
 watch(
-  () => live.value.length,
+  scrollTick,
   async () => {
     await nextTick();
     if (timelineRef.value) timelineRef.value.scrollTop = timelineRef.value.scrollHeight;
@@ -222,11 +284,12 @@ const visibleMessages = computed(() =>
               <div class="role-row">
                 <span class="role">{{ msgRole(m) }}</span>
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
+                <button class="ask" @click="askStep(m)">🔍问</button>
               </div>
               <div class="body" v-html="renderContent(m.message?.content)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
-              <div class="role">tool</div>
+              <div class="role">tool<button class="ask" @click="askStep(m)">🔍问</button></div>
               <div class="body">
                 <details>
                   <summary class="tool-result">↳ result</summary>
@@ -237,6 +300,14 @@ const visibleMessages = computed(() =>
           </div>
         </template>
         <div v-for="l in live" :key="l.id" v-html="l.html"></div>
+        <div v-for="b in studyBlocks" :key="'s' + b.id" class="msg study live">
+          <div class="role">🔍 深问</div>
+          <div class="study-q">{{ b.question }}</div>
+          <div v-if="b.thinking" class="thinking">{{ b.thinking }}</div>
+          <template v-for="t in b.tools" :key="t.id"><div v-html="t.html"></div></template>
+          <div v-if="b.bodyHtml" class="body" v-html="b.bodyHtml" />
+          <div v-else-if="b.bodyText" class="body">{{ b.bodyText }}</div>
+        </div>
       </div>
       <div v-if="store.sessionId" class="composer">
         <textarea

@@ -57,3 +57,6 @@ details > pre { margin: 4px 0 4px 14px; }
 .send:disabled { background: #444; color: #888; cursor: not-allowed; }
 .stop { background: #444; color: #ddd; }
 .msg.live { opacity: 0.92; border-style: dashed; }
+.msg.study { border-color: #b388ff; }
+.study-q { color: #b388ff; font-size: 12px; margin: 2px 0; }
+.thinking { font-size: 12px; color: #777; white-space: pre-wrap; border-left: 2px solid #333; padding-left: 8px; margin: 4px 0; max-height: 120px; overflow: auto; }
