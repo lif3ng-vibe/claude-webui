@@ -10,6 +10,8 @@ export interface ProjectEntry {
   /** 权威 cwd，从 session jsonl 的 `cwd` 字段读取（兜底用 dirName） */
   cwd: string;
   sessionCount: number;
+  /** 该目录下最新 session 的 mtime（ms），供“最近更新”排序，无需前端预加载 */
+  latestMtimeMs: number;
 }
 
 /** 一个 session 文件（~/.claude/projects/<dirName>/<sessionId>.jsonl）。 */
@@ -71,7 +73,8 @@ export class ClaudeFileReader {
     for (const dirName of entries) {
       const sessions = await this.listSessions(dirName);
       const cwd = await this.readCwd(dirName, sessions);
-      out.push({ dirName, cwd, sessionCount: sessions.length });
+      const latestMtimeMs = sessions.length ? Math.max(...sessions.map((s) => s.mtimeMs)) : 0;
+      out.push({ dirName, cwd, sessionCount: sessions.length, latestMtimeMs });
     }
     return out;
   }

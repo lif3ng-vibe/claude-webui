@@ -38,6 +38,7 @@ describe('ClaudeFileReader', () => {
     expect(projects[0].dirName).toBe(dirName);
     expect(projects[0].cwd).toBe(cwd); // authoritative cwd from jsonl, not decoded
     expect(projects[0].sessionCount).toBe(1);
+    expect(projects[0].latestMtimeMs).toBeGreaterThan(0);
 
     const sessions = await reader.listSessions(dirName);
     expect(sessions).toHaveLength(1);

@@ -2,6 +2,7 @@ export interface ProjectEntry {
   dirName: string;
   cwd: string;
   sessionCount: number;
+  latestMtimeMs: number;
 }
 
 export interface SessionEntry {

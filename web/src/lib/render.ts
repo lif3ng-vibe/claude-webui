@@ -43,6 +43,18 @@ export function fmtBytes(n: number): string {
   return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 }
 
+/** 相对时间，超过 7 天回退为日期。 */
+export function fmtTime(ms: number): string {
+  if (!ms) return '';
+  const diff = Date.now() - ms;
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分前`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}天前`;
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}-${d.getDate()}`;
+}
+
 /** 在已渲染的 HTML 里高亮命中（只在标签之间的文本片段插入 <mark>，不破坏标签）。 */
 export function highlightInHtml(html: string, term: string): string {
   if (!term) return html;

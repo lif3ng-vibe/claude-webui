@@ -18,6 +18,7 @@ body {
 .item.project { display: flex; align-items: center; gap: 6px; }
 .item.project .title { flex: 1 1 auto; min-width: 0; }
 .count-badge { flex-shrink: 0; background: #2a2a2a; color: #888; font-size: 11px; padding: 1px 8px; border-radius: 10px; }
+.dir-time { flex-shrink: 0; font-size: 11px; color: #666; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: none; border: 1px solid transparent; border-radius: 6px; color: #8ab4f8; cursor: pointer; }
 .icon-btn:hover { background: #2a2a2a; border-color: #444; }
 .sub-tree { padding-left: 14px; }

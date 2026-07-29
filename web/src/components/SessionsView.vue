@@ -6,7 +6,7 @@ import { NInput, NSpin, NEmpty, NSelect, NPopover, NCheckbox } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
 import { useDisplayStore } from '../stores/display';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
-import { renderContent, renderTool, renderMd, hl, fmtBytes, esc } from '../lib/render';
+import { renderContent, renderTool, renderMd, hl, fmtBytes, fmtTime, esc } from '../lib/render';
 import { readSSE, type SSEEvent } from '../lib/sse';
 
 const store = useSessionStore();
@@ -52,25 +52,12 @@ const sessionSortOptions = [
   { label: '名称', value: 'name' },
   { label: '大小', value: 'size' },
 ];
-// 按更新排序目录时需要预加载所有 session
-watch(
-  () => display.dirSort,
-  async (v) => {
-    if (v === 'updated' && !allLoaded.value) {
-      await loadAllSessions();
-      allLoaded.value = true;
-    }
-  },
-);
-function latestMtime(dir: string): number {
-  const ss = sessionsCache.value[dir] || [];
-  return ss.length ? Math.max(...ss.map((s) => s.mtimeMs)) : 0;
-}
+// 按更新排序目录：latestMtimeMs 由后端 /api/projects 直接返回，无需预加载
 
 // 显隐复选：Ctrl/Cmd 点击 = 只选当前这一项（同组其余置 false）
-type BoolKey = 'showToolUse' | 'showToolResult' | 'showThinking' | 'showCountBadge' | 'showSessionSub';
+type BoolKey = 'showToolUse' | 'showToolResult' | 'showThinking' | 'showCountBadge' | 'showSessionSub' | 'showDirTime';
 const timelineGroup: BoolKey[] = ['showToolUse', 'showToolResult', 'showThinking'];
-const sidebarGroup: BoolKey[] = ['showCountBadge', 'showSessionSub'];
+const sidebarGroup: BoolKey[] = ['showCountBadge', 'showSessionSub', 'showDirTime'];
 function onCheck(e: MouseEvent, key: BoolKey, group: BoolKey[]): void {
   const d = display as unknown as Record<string, boolean>;
   if (e.ctrlKey || e.metaKey) {
@@ -112,7 +99,7 @@ const tree = computed<TreeNode[]>(() => {
     return { p, show, open, sessions };
   });
   // 目录排序
-  if (display.dirSort === 'updated') nodes.sort((a, b) => latestMtime(b.p.dirName) - latestMtime(a.p.dirName));
+  if (display.dirSort === 'updated') nodes.sort((a, b) => b.p.latestMtimeMs - a.p.latestMtimeMs);
   else nodes.sort((a, b) => a.p.cwd.localeCompare(b.p.cwd));
   // 各目录内 session 排序
   for (const n of nodes) {
@@ -354,6 +341,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <div class="ds-checks">
                 <NCheckbox :checked="display.showCountBadge" @click="onCheck($event, 'showCountBadge', sidebarGroup)">计数徽章</NCheckbox>
                 <NCheckbox :checked="display.showSessionSub" @click="onCheck($event, 'showSessionSub', sidebarGroup)">session 子标题</NCheckbox>
+                <NCheckbox :checked="display.showDirTime" @click="onCheck($event, 'showDirTime', sidebarGroup)">目录更新时间</NCheckbox>
               </div>
             </div>
           </NPopover>
@@ -371,6 +359,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
             <div v-if="node.show" class="item project" @click="toggle(node.p)">
               <svg class="caret" :class="{ open: node.open }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 1 L8 5 L2 9 Z" fill="currentColor" /></svg>
               <span class="title" v-html="hl(node.p.cwd, q)" />
+              <span v-if="display.showDirTime" class="dir-time">{{ fmtTime(node.p.latestMtimeMs) }}</span>
               <span v-if="display.showCountBadge" class="count-badge">{{ node.p.sessionCount }}</span>
             </div>
             <div v-if="node.show && node.open" class="sub-tree">
