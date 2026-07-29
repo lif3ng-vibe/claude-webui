@@ -55,8 +55,8 @@ const sessionSortOptions = [
 // 按更新排序目录：latestMtimeMs 由后端 /api/projects 直接返回，无需预加载
 
 // 显隐复选：Ctrl/Cmd 点击 = 只选当前这一项（同组其余置 false）
-type BoolKey = 'showToolUse' | 'showToolResult' | 'showThinking' | 'showCountBadge' | 'showSessionSub' | 'showDirTime';
-const timelineGroup: BoolKey[] = ['showToolUse', 'showToolResult', 'showThinking'];
+type BoolKey = 'showToolUse' | 'showToolResult' | 'showThinking' | 'showCountBadge' | 'showSessionSub' | 'showDirTime' | 'showCheckbox';
+const timelineGroup: BoolKey[] = ['showToolUse', 'showToolResult', 'showThinking', 'showCheckbox'];
 const sidebarGroup: BoolKey[] = ['showCountBadge', 'showSessionSub', 'showDirTime'];
 function onCheck(e: MouseEvent, key: BoolKey, group: BoolKey[]): void {
   const d = display as unknown as Record<string, boolean>;
@@ -431,6 +431,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 <NCheckbox :checked="display.showToolUse" @click="onCheck($event, 'showToolUse', timelineGroup)">工具调用</NCheckbox>
                 <NCheckbox :checked="display.showToolResult" @click="onCheck($event, 'showToolResult', timelineGroup)">工具结果</NCheckbox>
                 <NCheckbox :checked="display.showThinking" @click="onCheck($event, 'showThinking', timelineGroup)">思考</NCheckbox>
+                <NCheckbox :checked="display.showCheckbox" @click="onCheck($event, 'showCheckbox', timelineGroup)">复选框</NCheckbox>
               </div>
               <div class="ds-divider">侧栏显隐</div>
               <div class="ds-checks">
@@ -453,7 +454,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
           <template v-for="node in tree" :key="node.p.dirName">
             <div v-if="node.show" class="item project" @click="toggle(node.p)">
               <svg class="caret" :class="{ open: node.open }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 1 L8 5 L2 9 Z" fill="currentColor" /></svg>
-              <span class="title" v-html="hl(node.p.cwd, q)" />
+              <span class="title" :title="node.p.cwd" v-html="hl(node.p.cwd, q)" />
               <span v-if="display.showDirTime" class="dir-time">{{ fmtTime(node.p.latestMtimeMs) }}</span>
               <span v-if="display.showCountBadge" class="count-badge">{{ node.p.sessionCount }}</span>
             </div>
@@ -465,8 +466,8 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 :class="{ active: store.sessionId === s.sessionId }"
                 @click.stop="selectSession(node.p.dirName, s)"
               >
-                <div class="title" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
-                <div v-if="display.showSessionSub" class="sub">{{ sessionSub(s) }}</div>
+                <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
+                <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>
               </div>
             </div>
           </template>
@@ -497,7 +498,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
           >
             <template v-if="m.type === 'user' || m.type === 'assistant'">
               <div class="role-row">
-                <input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />
+                <input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />
                 <span class="role">{{ msgRole(m) }}</span>
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
                 <button class="ask" @click="askStep(m)">🔍问</button>
@@ -505,7 +506,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <div class="body" v-html="renderContent(m.message?.content, msgQ, renderOpts)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
-              <div class="role"><input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
+              <div class="role"><input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
               <div class="body" v-html="renderTool(m.toolUseResult, m.raw, msgQ)" />
             </template>
           </div>

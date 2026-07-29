@@ -11,5 +11,6 @@ export const useDisplayStore = defineStore('display', () => {
   const showCountBadge = useStorage('cwu-showCountBadge', true);
   const showSessionSub = useStorage('cwu-showSessionSub', true);
   const showDirTime = useStorage('cwu-showDirTime', true);
-  return { dirSort, sessionSort, showToolUse, showToolResult, showThinking, showCountBadge, showSessionSub, showDirTime };
+  const showCheckbox = useStorage('cwu-showCheckbox', true);
+  return { dirSort, sessionSort, showToolUse, showToolResult, showThinking, showCountBadge, showSessionSub, showDirTime, showCheckbox };
 });
