@@ -115,7 +115,7 @@ const tree = computed<TreeNode[]>(() => {
 function selectSession(dir: string, s: SessionEntry): void {
   live.value = [];
   studyBlocks.value = [];
-  selectedMsgs.value = new Set();
+  clearSelection();
   store.select(dir, s.sessionId, s.preview || s.sessionId.slice(0, 8));
 }
 
@@ -126,7 +126,7 @@ function sessionSub(s: SessionEntry): string {
 function refresh(): void {
   live.value = [];
   studyBlocks.value = [];
-  selectedMsgs.value = new Set();
+  clearSelection();
   void messagesQuery.refetch();
 }
 
@@ -218,14 +218,84 @@ function askStep(m: (typeof messages.value)[number]): void {
   void studyStream(store.dirName, store.sessionId, [stepPayload(m)], question);
 }
 
-// 多选若干步一起向 LLM 提问
+// 多选若干步一起向 LLM 提问；Shift+点击范围选中（仅当上次变化是“选中”时生效）
 const selectedMsgs = ref<Set<(typeof messages.value)[number]>>(new Set());
-function toggleSelect(m: (typeof messages.value)[number]): void {
-  const s = new Set(selectedMsgs.value);
-  if (s.has(m)) s.delete(m);
-  else s.add(m);
-  selectedMsgs.value = s;
+const anchorIdx = ref<number | null>(null);
+const anchorSelected = ref(false);
+function clearSelection(): void {
+  selectedMsgs.value = new Set();
+  anchorIdx.value = null;
+  anchorSelected.value = false;
 }
+function onSelectClick(e: MouseEvent, i: number): void {
+  const list = visibleMessages.value;
+  const m = list[i];
+  if (e.shiftKey && anchorSelected.value && anchorIdx.value != null) {
+    const from = Math.min(anchorIdx.value, i);
+    const to = Math.max(anchorIdx.value, i);
+    const s = new Set(selectedMsgs.value);
+    for (let k = from; k <= to; k++) s.add(list[k]);
+    selectedMsgs.value = s;
+    return;
+  }
+  const s = new Set(selectedMsgs.value);
+  if (s.has(m)) {
+    s.delete(m);
+    anchorSelected.value = false;
+  } else {
+    s.add(m);
+    anchorSelected.value = true;
+  }
+  selectedMsgs.value = s;
+  anchorIdx.value = i;
+}
+
+// 鼠标拖动矩形框选
+const dragRect = ref<{ x: number; y: number; w: number; h: number } | null>(null);
+let dragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+function rectsIntersect(a: { x: number; y: number; w: number; h: number }, b: DOMRect): boolean {
+  return a.x < b.right && a.x + a.w > b.left && a.y < b.bottom && a.y + a.h > b.top;
+}
+function onTimelineMouseDown(e: MouseEvent): void {
+  if (e.button !== 0) return;
+  const t = e.target as Element;
+  if (t.closest('input,button,a,summary,pre,textarea,details')) return; // 不劫持交互元素
+  dragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragRect.value = { x: dragStartX, y: dragStartY, w: 0, h: 0 };
+  window.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', onDragUp);
+  e.preventDefault();
+}
+function onDragMove(e: MouseEvent): void {
+  if (!dragging || !dragRect.value || !timelineRef.value) return;
+  const x = Math.min(dragStartX, e.clientX);
+  const y = Math.min(dragStartY, e.clientY);
+  const w = Math.abs(e.clientX - dragStartX);
+  const h = Math.abs(e.clientY - dragStartY);
+  dragRect.value = { x, y, w, h };
+  if (w < 4 && h < 4) return;
+  const s = new Set<(typeof messages.value)[number]>();
+  timelineRef.value.querySelectorAll<HTMLElement>('.msg').forEach((el) => {
+    if (rectsIntersect(dragRect.value!, el.getBoundingClientRect())) {
+      const idx = Number(el.dataset.idx);
+      if (!Number.isNaN(idx)) s.add(visibleMessages.value[idx]);
+    }
+  });
+  selectedMsgs.value = s;
+  anchorIdx.value = null;
+  anchorSelected.value = false;
+}
+function onDragUp(): void {
+  dragging = false;
+  dragRect.value = null;
+  window.removeEventListener('mousemove', onDragMove);
+  window.removeEventListener('mouseup', onDragUp);
+}
+
 function askSelected(): void {
   if (!store.dirName || !store.sessionId) {
     alert('请先选择一个 session');
@@ -236,7 +306,7 @@ function askSelected(): void {
   const question = prompt(`向 LLM 提问选中的 ${steps.length} 步：`);
   if (!question) return;
   void studyStream(store.dirName, store.sessionId, steps, question);
-  selectedMsgs.value = new Set();
+  clearSelection();
 }
 
 async function studyStream(dir: string, sid: string, steps: unknown[], question: string): Promise<void> {
@@ -408,24 +478,26 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
       <div class="px-4 pt-3 pb-2 flex items-center gap-2">
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
         <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
+        <button v-if="selectedMsgs.size" class="ask" @click="clearSelection()">取消选中</button>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
       </div>
       <div v-if="store.sessionId" class="px-4 pb-2 flex items-center gap-2">
         <NInput v-model:value="msgSearch" size="small" placeholder="搜索本 session 消息内容…" clearable class="flex-1" />
         <span v-if="msgSearch.trim()" class="text-[11px] text-[#666] whitespace-nowrap">{{ visibleMessages.length }}/{{ totalMessages }}</span>
       </div>
-      <div ref="timelineRef" class="flex-1 min-h-0 overflow-auto px-4 pb-3" @scroll="onTimelineScroll">
+      <div ref="timelineRef" class="flex-1 min-h-0 overflow-auto px-4 pb-3" @scroll="onTimelineScroll" @mousedown="onTimelineMouseDown">
         <div v-if="!store.sessionId" class="empty">选择一个 session 查看消息</div>
         <div v-else-if="messagesQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
         <template v-else>
           <div
             v-for="(m, i) in visibleMessages"
             :key="m.uuid || i"
-            :class="['msg', msgClass(m)]"
+            :data-idx="i"
+            :class="['msg', msgClass(m), { selected: selectedMsgs.has(m) }]"
           >
             <template v-if="m.type === 'user' || m.type === 'assistant'">
               <div class="role-row">
-                <input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="toggleSelect(m)" />
+                <input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />
                 <span class="role">{{ msgRole(m) }}</span>
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
                 <button class="ask" @click="askStep(m)">🔍问</button>
@@ -433,7 +505,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <div class="body" v-html="renderContent(m.message?.content, msgQ, renderOpts)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
-              <div class="role"><input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="toggleSelect(m)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
+              <div class="role"><input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
               <div class="body" v-html="renderTool(m.toolUseResult, m.raw, msgQ)" />
             </template>
           </div>
@@ -465,5 +537,10 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
       </div>
       <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()">↑</button>
     </main>
+    <div
+      v-if="dragRect"
+      class="drag-rect"
+      :style="{ left: dragRect.x + 'px', top: dragRect.y + 'px', width: dragRect.w + 'px', height: dragRect.h + 'px' }"
+    ></div>
   </div>
 </template>

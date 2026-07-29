@@ -31,6 +31,7 @@ mark { background: #5c4a1a; color: #ffd54f; border-radius: 2px; padding: 0 1px; 
 .msg.user { border-color: #8ab4f8; }
 .msg.assistant { border-color: #34a853; }
 .msg.tool { border-color: #fbbc04; }
+.msg.selected { background: rgba(179, 136, 255, 0.14); }
 .msg .role-row { display: flex; gap: 8px; }
 .msg .role { font-size: 11px; color: #888; text-transform: uppercase; }
 .msg .time { font-size: 11px; color: #666; }
@@ -87,3 +88,4 @@ details > pre { margin: 4px 0 4px 14px; }
 .req-details > summary { color: #8ab4f8; }
 .req-details > pre { max-height: 320px; overflow: auto; font-size: 12px; background: #111; padding: 8px; border-radius: 6px; }
 .sel-cb { margin-right: 6px; cursor: pointer; accent-color: #b388ff; vertical-align: middle; }
+.drag-rect { position: fixed; border: 1px solid #8ab4f8; background: rgba(138, 180, 248, 0.15); pointer-events: none; z-index: 1000; }
