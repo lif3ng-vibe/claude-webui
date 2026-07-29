@@ -77,7 +77,8 @@ function contentBlocksHtml(content: unknown, opts: RenderOpts = {}): string {
   return content
     .map((b) => {
       if (b.type === 'text') return renderMd(b.text);
-      if (b.type === 'thinking') return opts.thinking === false ? '' : `<div class="thinking">${esc(b.thinking ?? b.text ?? '')}</div>`;
+      if (b.type === 'thinking')
+        return opts.thinking === false ? '' : `<details class="thinking-details"><summary>💭 思考</summary><div class="thinking">${esc(b.thinking ?? b.text ?? '')}</div></details>`;
       if (b.type === 'tool_use')
         return opts.toolUse === false ? '' : `<details><summary class="tool-call">🔧 ${esc(b.name)}</summary><pre>${esc(JSON.stringify(b.input ?? {}, null, 2))}</pre></details>`;
       if (b.type === 'tool_result')
