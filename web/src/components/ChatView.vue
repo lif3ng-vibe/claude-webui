@@ -39,6 +39,7 @@ interface ChatMsg {
   bodyText: string; // assistant 累积文本
   thinking: string;
   bodyHtml: string;
+  requests: string[]; // 发给 provider 的完整请求 JSON（可查看）
 }
 const chatMsgs = ref<ChatMsg[]>([]);
 let chatId = 0;
@@ -63,8 +64,8 @@ async function sendChat(): Promise<void> {
   chatInput.value = '';
   sending.value = true;
   chatAbort.value = new AbortController();
-  chatMsgs.value.push({ id: chatId++, role: 'user', content: text, bodyText: '', thinking: '', bodyHtml: '' });
-  chatMsgs.value.push({ id: chatId++, role: 'assistant', content: '', bodyText: '', thinking: '', bodyHtml: '' });
+  chatMsgs.value.push({ id: chatId++, role: 'user', content: text, bodyText: '', thinking: '', bodyHtml: '', requests: [] });
+  chatMsgs.value.push({ id: chatId++, role: 'assistant', content: '', bodyText: '', thinking: '', bodyHtml: '', requests: [] });
   const a = chatMsgs.value[chatMsgs.value.length - 1];
   chatScrollTick.value++;
   try {
@@ -79,7 +80,8 @@ async function sendChat(): Promise<void> {
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
     await readSSE(resp, (ev) => {
-      if (ev.event === 'thinking') a.thinking += ev.data?.text ?? '';
+      if (ev.event === 'request') a.requests.push(JSON.stringify(ev.data?.request, null, 2));
+      else if (ev.event === 'thinking') a.thinking += ev.data?.text ?? '';
       else if (ev.event === 'text') a.bodyText += ev.data?.text ?? '';
       else if (ev.event === 'error') a.bodyText += `\n[error] ${ev.data?.error ?? ''}`;
       chatScrollTick.value++;
@@ -124,6 +126,10 @@ async function sendChat(): Promise<void> {
             <div v-if="m.thinking" class="thinking">{{ m.thinking }}</div>
             <div v-if="m.bodyHtml" class="body" v-html="m.bodyHtml" />
             <div v-else-if="m.bodyText" class="body">{{ m.bodyText }}</div>
+            <details v-for="(r, i) in m.requests" :key="'req' + i" class="req-details">
+              <summary>请求 #{{ i + 1 }}</summary>
+              <pre>{{ r }}</pre>
+            </details>
           </template>
         </div>
       </div>

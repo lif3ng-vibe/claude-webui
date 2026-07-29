@@ -20,6 +20,7 @@ export interface ProviderToolCall {
 
 /** provider 流的增量输出。 */
 export type ProviderStreamDelta =
+  | { type: 'request'; request: unknown }
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; toolCall: ProviderToolCall }

@@ -144,6 +144,7 @@ interface StudyBlock {
   tools: { id: number; html: string }[];
   bodyText: string;
   bodyHtml: string;
+  requests: string[];
 }
 const studyBlocks = ref<StudyBlock[]>([]);
 let studyId = 0;
@@ -216,7 +217,7 @@ function askStep(m: (typeof messages.value)[number]): void {
 }
 
 async function studyStream(dir: string, sid: string, step: unknown, question: string): Promise<void> {
-  studyBlocks.value.push({ id: studyId, question, thinking: '', tools: [], bodyText: '', bodyHtml: '' });
+  studyBlocks.value.push({ id: studyId, question, thinking: '', tools: [], bodyText: '', bodyHtml: '', requests: [] });
   const b = studyBlocks.value[studyBlocks.value.length - 1];
   studyId++;
   scrollTick.value++;
@@ -228,7 +229,8 @@ async function studyStream(dir: string, sid: string, step: unknown, question: st
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
     await readSSE(resp, (ev) => {
-      if (ev.event === 'thinking') b.thinking += ev.data?.text ?? '';
+      if (ev.event === 'request') b.requests.push(JSON.stringify(ev.data?.request, null, 2));
+      else if (ev.event === 'thinking') b.thinking += ev.data?.text ?? '';
       else if (ev.event === 'tool_use' && display.showToolUse)
         b.tools.push({ id: toolId++, html: `<div class="tool-call">🔧 ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
       else if (ev.event === 'tool_result' && display.showToolResult)
@@ -419,6 +421,10 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
           <template v-for="t in b.tools" :key="t.id"><div v-html="t.html"></div></template>
           <div v-if="b.bodyHtml" class="body" v-html="b.bodyHtml" />
           <div v-else-if="b.bodyText" class="body">{{ b.bodyText }}</div>
+          <details v-for="(r, i) in b.requests" :key="'sreq' + i" class="req-details">
+            <summary>请求 #{{ i + 1 }}</summary>
+            <pre>{{ r }}</pre>
+          </details>
         </div>
       </div>
       <div v-if="store.sessionId" class="composer">

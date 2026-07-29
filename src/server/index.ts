@@ -164,13 +164,15 @@ async function handleChat(req: IncomingMessage, res: ServerResponse): Promise<vo
       systemPrompt: typeof body.systemPrompt === 'string' ? body.systemPrompt : undefined,
     })) {
       const payload =
-        d.type === 'text' || d.type === 'thinking'
-          ? { text: d.text }
-          : d.type === 'tool_use'
-            ? { toolCall: d.toolCall }
-            : d.type === 'error'
-              ? { error: d.error }
-              : {};
+        d.type === 'request'
+          ? { request: d.request }
+          : d.type === 'text' || d.type === 'thinking'
+            ? { text: d.text }
+            : d.type === 'tool_use'
+              ? { toolCall: d.toolCall }
+              : d.type === 'error'
+                ? { error: d.error }
+                : {};
       write(`event: ${d.type}\n`);
       write(`data: ${JSON.stringify(payload)}\n\n`);
     }
@@ -227,15 +229,17 @@ async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<v
       executeTool: executor,
     })) {
       const payload =
-        d.type === 'text' || d.type === 'thinking'
-          ? { text: d.text }
-          : d.type === 'tool_use'
-            ? { toolCall: d.toolCall }
-            : d.type === 'tool_result'
-              ? { id: d.id, name: d.name, result: d.result }
-              : d.type === 'error'
-                ? { error: d.error }
-                : {};
+        d.type === 'request'
+          ? { request: d.request }
+          : d.type === 'text' || d.type === 'thinking'
+            ? { text: d.text }
+            : d.type === 'tool_use'
+              ? { toolCall: d.toolCall }
+              : d.type === 'tool_result'
+                ? { id: d.id, name: d.name, result: d.result }
+                : d.type === 'error'
+                  ? { error: d.error }
+                  : {};
       write(`event: ${d.type}\n`);
       write(`data: ${JSON.stringify(payload)}\n\n`);
     }

@@ -84,3 +84,5 @@ details > pre { margin: 4px 0 4px 14px; }
 .ds-divider { font-size: 12px; color: #b0b0b0; margin-top: 4px; border-top: 1px solid #333; padding-top: 6px; }
 .ds-checks { display: flex; flex-direction: column; gap: 4px; }
 .ds .n-checkbox__label { color: #ddd; }
+.req-details > summary { color: #8ab4f8; }
+.req-details > pre { max-height: 320px; overflow: auto; font-size: 12px; background: #111; padding: 8px; border-radius: 6px; }

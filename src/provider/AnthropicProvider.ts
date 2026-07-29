@@ -60,6 +60,8 @@ export class AnthropicProvider implements Provider {
           messages,
           ...(tools ? { tools } : {}),
         };
+        // 暴露完整请求内容供前端查看（深拷贝当前快照，避免后续 mutation 影响）
+        yield { type: 'request', request: JSON.parse(JSON.stringify(params)) };
         const stream = this.client.messages.stream(params as unknown as Anthropic.MessageCreateParamsStreaming);
 
         for await (const evt of stream) {
