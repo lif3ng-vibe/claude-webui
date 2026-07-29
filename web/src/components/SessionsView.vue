@@ -40,6 +40,23 @@ watch(q, async (val) => {
   }
 });
 
+// 排序规则
+const sortOptions = [
+  { label: '更新时间', value: 'updated' },
+  { label: '名称', value: 'name' },
+];
+const sortRule = ref<'updated' | 'name'>('updated');
+watch(sortRule, async (v) => {
+  if (v === 'updated' && !allLoaded.value) {
+    await loadAllSessions();
+    allLoaded.value = true;
+  }
+});
+function latestMtime(dir: string): number {
+  const ss = sessionsCache.value[dir] || [];
+  return ss.length ? Math.max(...ss.map((s) => s.mtimeMs)) : 0;
+}
+
 function toggle(p: ProjectEntry): void {
   const s = new Set(expanded.value);
   if (s.has(p.dirName)) s.delete(p.dirName);
@@ -59,7 +76,7 @@ interface TreeNode {
 
 const tree = computed<TreeNode[]>(() => {
   const term = q.value.trim().toLowerCase();
-  return projects.value.map((p) => {
+  const nodes = projects.value.map((p) => {
     if (!term) {
       return { p, show: true, open: expanded.value.has(p.dirName), sessions: (sessionsCache.value[p.dirName] || []).slice() };
     }
@@ -71,6 +88,16 @@ const tree = computed<TreeNode[]>(() => {
     const sessions = dirMatch ? (sessionsCache.value[p.dirName] || []).slice() : matching;
     return { p, show, open, sessions };
   });
+  // 目录排序
+  if (sortRule.value === 'updated') nodes.sort((a, b) => latestMtime(b.p.dirName) - latestMtime(a.p.dirName));
+  else nodes.sort((a, b) => a.p.cwd.localeCompare(b.p.cwd));
+  // 各目录内 session 排序
+  for (const n of nodes) {
+    n.sessions.sort((a, b) =>
+      sortRule.value === 'updated' ? b.mtimeMs - a.mtimeMs : (a.preview || '').localeCompare(b.preview || ''),
+    );
+  }
+  return nodes;
 });
 
 function selectSession(dir: string, s: SessionEntry): void {
@@ -275,9 +302,16 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
   <div class="h-full grid grid-cols-[340px_1fr]">
     <aside class="min-h-0 overflow-auto border-r border-[#333]">
       <div class="sticky top-0 bg-[#1a1a1a] p-2 border-b border-[#333] z-[1]">
-        <div class="text-[#8ab4f8] text-[15px] mb-2">Claude sessions</div>
-        <NInput v-model:value="search" placeholder="搜索目录或 session…" size="small" clearable />
-        <button v-if="expanded.size" class="collapse-all" @click="expanded = new Set()">全部收起</button>
+        <div class="flex items-center mb-2">
+          <div class="text-[#8ab4f8] text-[15px] flex-1">Claude sessions</div>
+          <button v-if="expanded.size" class="icon-btn" title="全部收起" @click="expanded = new Set()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11l5-5 5 5M7 17l5-5 5 5" /></svg>
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <NInput v-model:value="search" placeholder="搜索目录或 session…" size="small" clearable class="flex-1" />
+          <NSelect v-model:value="sortRule" :options="sortOptions" size="small" class="w-[92px]" />
+        </div>
       </div>
       <div class="p-2">
         <div v-if="projectsQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
@@ -285,9 +319,9 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
         <template v-else>
           <template v-for="node in tree" :key="node.p.dirName">
             <div v-if="node.show" class="item project" @click="toggle(node.p)">
-              <span class="caret">{{ node.open ? '▾' : '▸' }}</span>
+              <svg class="caret" :class="{ open: node.open }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 1 L8 5 L2 9 Z" fill="currentColor" /></svg>
               <span class="title" v-html="hl(node.p.cwd, q)" />
-              <span class="sub">{{ node.p.sessionCount }}</span>
+              <span class="count-badge">{{ node.p.sessionCount }}</span>
             </div>
             <div v-if="node.show && node.open" class="sub-tree">
               <div
