@@ -209,9 +209,13 @@ async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<v
 
   const executor = createFsToolExecutor([cwd, reader.claudeHome()]);
   const provider = new AnthropicProvider(cfg);
-  const stepText = JSON.stringify(body.step ?? null, null, 2).slice(0, 4000);
+  const steps = Array.isArray(body.steps) ? body.steps : body.step != null ? [body.step] : [];
+  const stepText = steps
+    .map((s: unknown, i: number) => `--- 步骤 ${i + 1} ---\n${JSON.stringify(s)}`)
+    .join('\n\n')
+    .slice(0, 8000);
   const userMessage =
-    `以下是 Claude Code session（工作目录 ${cwd}）里的某一步记录：\n\n${stepText}\n\n` +
+    `以下是 Claude Code session（工作目录 ${cwd}）里的 ${steps.length} 步记录：\n\n${stepText}\n\n` +
     `问题：${question}\n\n` +
     `你可以使用 read_file / list_files / grep（根目录为该工作目录，也可读 ~/.claude）查阅真实文件后再回答。`;
 

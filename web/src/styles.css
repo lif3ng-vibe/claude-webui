@@ -86,3 +86,4 @@ details > pre { margin: 4px 0 4px 14px; }
 .ds .n-checkbox__label { color: #ddd; }
 .req-details > summary { color: #8ab4f8; }
 .req-details > pre { max-height: 320px; overflow: auto; font-size: 12px; background: #111; padding: 8px; border-radius: 6px; }
+.sel-cb { margin-right: 6px; cursor: pointer; accent-color: #b388ff; vertical-align: middle; }

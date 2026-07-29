@@ -115,6 +115,7 @@ const tree = computed<TreeNode[]>(() => {
 function selectSession(dir: string, s: SessionEntry): void {
   live.value = [];
   studyBlocks.value = [];
+  selectedMsgs.value = new Set();
   store.select(dir, s.sessionId, s.preview || s.sessionId.slice(0, 8));
 }
 
@@ -125,6 +126,7 @@ function sessionSub(s: SessionEntry): string {
 function refresh(): void {
   live.value = [];
   studyBlocks.value = [];
+  selectedMsgs.value = new Set();
   void messagesQuery.refetch();
 }
 
@@ -213,10 +215,31 @@ function askStep(m: (typeof messages.value)[number]): void {
   }
   const question = prompt('向 LLM 提问这一步：');
   if (!question) return;
-  void studyStream(store.dirName, store.sessionId, stepPayload(m), question);
+  void studyStream(store.dirName, store.sessionId, [stepPayload(m)], question);
 }
 
-async function studyStream(dir: string, sid: string, step: unknown, question: string): Promise<void> {
+// 多选若干步一起向 LLM 提问
+const selectedMsgs = ref<Set<(typeof messages.value)[number]>>(new Set());
+function toggleSelect(m: (typeof messages.value)[number]): void {
+  const s = new Set(selectedMsgs.value);
+  if (s.has(m)) s.delete(m);
+  else s.add(m);
+  selectedMsgs.value = s;
+}
+function askSelected(): void {
+  if (!store.dirName || !store.sessionId) {
+    alert('请先选择一个 session');
+    return;
+  }
+  const steps = Array.from(selectedMsgs.value).map(stepPayload);
+  if (!steps.length) return;
+  const question = prompt(`向 LLM 提问选中的 ${steps.length} 步：`);
+  if (!question) return;
+  void studyStream(store.dirName, store.sessionId, steps, question);
+  selectedMsgs.value = new Set();
+}
+
+async function studyStream(dir: string, sid: string, steps: unknown[], question: string): Promise<void> {
   studyBlocks.value.push({ id: studyId, question, thinking: '', tools: [], bodyText: '', bodyHtml: '', requests: [] });
   const b = studyBlocks.value[studyBlocks.value.length - 1];
   studyId++;
@@ -225,7 +248,7 @@ async function studyStream(dir: string, sid: string, step: unknown, question: st
     const resp = await fetch('/api/study', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dirName: dir, sessionId: sid, step, question }),
+      body: JSON.stringify({ dirName: dir, sessionId: sid, steps, question }),
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
     await readSSE(resp, (ev) => {
@@ -384,6 +407,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
     <main class="relative min-h-0 flex flex-col overflow-hidden">
       <div class="px-4 pt-3 pb-2 flex items-center gap-2">
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
+        <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
       </div>
       <div v-if="store.sessionId" class="px-4 pb-2 flex items-center gap-2">
@@ -401,6 +425,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
           >
             <template v-if="m.type === 'user' || m.type === 'assistant'">
               <div class="role-row">
+                <input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="toggleSelect(m)" />
                 <span class="role">{{ msgRole(m) }}</span>
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
                 <button class="ask" @click="askStep(m)">🔍问</button>
@@ -408,7 +433,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <div class="body" v-html="renderContent(m.message?.content, msgQ, renderOpts)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
-              <div class="role">tool<button class="ask" @click="askStep(m)">🔍问</button></div>
+              <div class="role"><input type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="toggleSelect(m)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
               <div class="body" v-html="renderTool(m.toolUseResult, m.raw, msgQ)" />
             </template>
           </div>
