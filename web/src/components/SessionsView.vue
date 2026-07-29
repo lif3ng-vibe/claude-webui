@@ -212,6 +212,27 @@ watch(
   },
 );
 
+// 加载/刷新后默认滚到底
+function scrollToBottom(): void {
+  if (timelineRef.value) timelineRef.value.scrollTop = timelineRef.value.scrollHeight;
+}
+function scrollToTop(): void {
+  timelineRef.value?.scrollTo({ top: 0, behavior: 'smooth' });
+}
+const showTopBtn = ref(false);
+function onTimelineScroll(): void {
+  const el = timelineRef.value;
+  showTopBtn.value = !!el && el.scrollTop > 200;
+}
+watch(
+  () => messagesQuery.data.value,
+  async () => {
+    if (!messagesQuery.data.value) return;
+    await nextTick();
+    scrollToBottom();
+  },
+);
+
 function msgRole(m: (typeof messages.value)[number]): string {
   return (m.message?.role as string) || m.type;
 }
@@ -285,7 +306,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
       </div>
     </aside>
 
-    <main class="min-h-0 flex flex-col overflow-hidden">
+    <main class="relative min-h-0 flex flex-col overflow-hidden">
       <div class="px-4 pt-3 pb-2 flex items-center gap-2">
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
@@ -294,7 +315,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
         <NInput v-model:value="msgSearch" size="small" placeholder="搜索本 session 消息内容…" clearable class="flex-1" />
         <span v-if="msgSearch.trim()" class="text-[11px] text-[#666] whitespace-nowrap">{{ visibleMessages.length }}/{{ totalMessages }}</span>
       </div>
-      <div ref="timelineRef" class="flex-1 min-h-0 overflow-auto px-4 pb-3">
+      <div ref="timelineRef" class="flex-1 min-h-0 overflow-auto px-4 pb-3" @scroll="onTimelineScroll">
         <div v-if="!store.sessionId" class="empty">选择一个 session 查看消息</div>
         <div v-else-if="messagesQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
         <template v-else>
@@ -338,6 +359,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
         <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt">发送</button>
         <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
       </div>
+      <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()">↑</button>
     </main>
   </div>
 </template>
