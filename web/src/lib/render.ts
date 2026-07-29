@@ -65,24 +65,31 @@ export function highlightInHtml(html: string, term: string): string {
   });
 }
 
-function contentBlocksHtml(content: unknown): string {
+export interface RenderOpts {
+  toolUse?: boolean;
+  toolResult?: boolean;
+  thinking?: boolean;
+}
+
+function contentBlocksHtml(content: unknown, opts: RenderOpts = {}): string {
   if (typeof content === 'string') return renderMd(content);
   if (!Array.isArray(content)) return esc(JSON.stringify(content));
   return content
     .map((b) => {
       if (b.type === 'text') return renderMd(b.text);
+      if (b.type === 'thinking') return opts.thinking === false ? '' : `<div class="thinking">${esc(b.thinking ?? b.text ?? '')}</div>`;
       if (b.type === 'tool_use')
-        return `<details><summary class="tool-call">🔧 ${esc(b.name)}</summary><pre>${esc(JSON.stringify(b.input ?? {}, null, 2))}</pre></details>`;
+        return opts.toolUse === false ? '' : `<details><summary class="tool-call">🔧 ${esc(b.name)}</summary><pre>${esc(JSON.stringify(b.input ?? {}, null, 2))}</pre></details>`;
       if (b.type === 'tool_result')
-        return `<details><summary class="tool-result">↳ result</summary><pre>${esc(String(b.content ?? '').slice(0, 2000))}</pre></details>`;
+        return opts.toolResult === false ? '' : `<details><summary class="tool-result">↳ result</summary><pre>${esc(String(b.content ?? '').slice(0, 2000))}</pre></details>`;
       return esc(JSON.stringify(b));
     })
     .join('\n');
 }
 
-/** 渲染 session 消息内容块（可选高亮命中 term）。 */
-export function renderContent(content: unknown, term = ''): string {
-  const html = contentBlocksHtml(content);
+/** 渲染 session 消息内容块（可选高亮命中 term、显隐控制）。 */
+export function renderContent(content: unknown, term = '', opts: RenderOpts = {}): string {
+  const html = contentBlocksHtml(content, opts);
   return term ? highlightInHtml(html, term) : html;
 }
 

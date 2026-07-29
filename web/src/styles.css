@@ -77,3 +77,9 @@ details > pre { margin: 4px 0 4px 14px; }
 .settings-btn:hover { color: #8ab4f8; }
 .back-top { position: absolute; right: 16px; bottom: 76px; z-index: 5; width: 34px; height: 34px; border-radius: 50%; background: #2a2a2a; color: #8ab4f8; border: 1px solid #444; cursor: pointer; font-size: 16px; line-height: 1; }
 .back-top:hover { background: #3a3a3a; }
+.ds { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
+.ds-row { display: flex; align-items: center; gap: 8px; }
+.ds-lbl { width: 84px; font-size: 12px; color: #888; flex-shrink: 0; }
+.ds-divider { font-size: 12px; color: #b0b0b0; margin-top: 4px; border-top: 1px solid #333; padding-top: 6px; }
+.ds-checks { display: flex; flex-direction: column; gap: 4px; }
+.ds .n-checkbox__label { color: #ddd; }

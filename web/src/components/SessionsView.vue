@@ -2,8 +2,9 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { refDebounced } from '@vueuse/core';
-import { NInput, NSpin, NEmpty } from 'naive-ui';
+import { NInput, NSpin, NEmpty, NSelect, NPopover, NCheckbox } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
+import { useDisplayStore } from '../stores/display';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
 import { renderContent, renderTool, renderMd, hl, fmtBytes, esc } from '../lib/render';
 import { readSSE, type SSEEvent } from '../lib/sse';
@@ -40,21 +41,43 @@ watch(q, async (val) => {
   }
 });
 
-// 排序规则
-const sortOptions = [
+// 显示/排序偏好
+const display = useDisplayStore();
+const dirSortOptions = [
+  { label: '最近更新', value: 'updated' },
+  { label: '字母顺序', value: 'name' },
+];
+const sessionSortOptions = [
   { label: '更新时间', value: 'updated' },
   { label: '名称', value: 'name' },
+  { label: '大小', value: 'size' },
 ];
-const sortRule = ref<'updated' | 'name'>('updated');
-watch(sortRule, async (v) => {
-  if (v === 'updated' && !allLoaded.value) {
-    await loadAllSessions();
-    allLoaded.value = true;
-  }
-});
+// 按更新排序目录时需要预加载所有 session
+watch(
+  () => display.dirSort,
+  async (v) => {
+    if (v === 'updated' && !allLoaded.value) {
+      await loadAllSessions();
+      allLoaded.value = true;
+    }
+  },
+);
 function latestMtime(dir: string): number {
   const ss = sessionsCache.value[dir] || [];
   return ss.length ? Math.max(...ss.map((s) => s.mtimeMs)) : 0;
+}
+
+// 显隐复选：Ctrl/Cmd 点击 = 只选当前这一项（同组其余置 false）
+type BoolKey = 'showToolUse' | 'showToolResult' | 'showThinking' | 'showCountBadge' | 'showSessionSub';
+const timelineGroup: BoolKey[] = ['showToolUse', 'showToolResult', 'showThinking'];
+const sidebarGroup: BoolKey[] = ['showCountBadge', 'showSessionSub'];
+function onCheck(e: MouseEvent, key: BoolKey, group: BoolKey[]): void {
+  const d = display as unknown as Record<string, boolean>;
+  if (e.ctrlKey || e.metaKey) {
+    for (const k of group) d[k] = k === key;
+  } else {
+    d[key] = !d[key];
+  }
 }
 
 function toggle(p: ProjectEntry): void {
@@ -89,13 +112,15 @@ const tree = computed<TreeNode[]>(() => {
     return { p, show, open, sessions };
   });
   // 目录排序
-  if (sortRule.value === 'updated') nodes.sort((a, b) => latestMtime(b.p.dirName) - latestMtime(a.p.dirName));
+  if (display.dirSort === 'updated') nodes.sort((a, b) => latestMtime(b.p.dirName) - latestMtime(a.p.dirName));
   else nodes.sort((a, b) => a.p.cwd.localeCompare(b.p.cwd));
   // 各目录内 session 排序
   for (const n of nodes) {
-    n.sessions.sort((a, b) =>
-      sortRule.value === 'updated' ? b.mtimeMs - a.mtimeMs : (a.preview || '').localeCompare(b.preview || ''),
-    );
+    n.sessions.sort((a, b) => {
+      if (display.sessionSort === 'name') return (a.preview || '').localeCompare(b.preview || '');
+      if (display.sessionSort === 'size') return b.size - a.size;
+      return b.mtimeMs - a.mtimeMs; // updated
+    });
   }
   return nodes;
 });
@@ -142,9 +167,9 @@ function appendStreamEvent(ev: SSEEvent): void {
   if (ev.event === 'stream-json') {
     const d = ev.data;
     if (d?.type === 'assistant' && d.message?.content)
-      html = `<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content)}</div></div>`;
+      html = `<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content, '', renderOpts.value)}</div></div>`;
     else if (d?.type === 'user' && d.message?.content)
-      html = `<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content)}</div></div>`;
+      html = `<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content, '', renderOpts.value)}</div></div>`;
     else if (d?.type === 'result')
       html = `<div class="msg live"><div class="role">result · live</div><div class="body">${esc(typeof d.result === 'string' ? d.result : JSON.stringify(d.result ?? ''))}</div></div>`;
     else if (d?.type !== 'system')
@@ -217,9 +242,9 @@ async function studyStream(dir: string, sid: string, step: unknown, question: st
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
     await readSSE(resp, (ev) => {
       if (ev.event === 'thinking') b.thinking += ev.data?.text ?? '';
-      else if (ev.event === 'tool_use')
+      else if (ev.event === 'tool_use' && display.showToolUse)
         b.tools.push({ id: toolId++, html: `<div class="tool-call">🔧 ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
-      else if (ev.event === 'tool_result')
+      else if (ev.event === 'tool_result' && display.showToolResult)
         b.tools.push({ id: toolId++, html: `<div class="tool-result">↳ ${esc(ev.data?.name)}: ${esc(String(ev.data?.result ?? '')).slice(0, 300)}</div>` });
       else if (ev.event === 'text') b.bodyText += ev.data?.text ?? '';
       else if (ev.event === 'error') b.bodyText += `\n[error] ${ev.data?.error ?? ''}`;
@@ -287,15 +312,21 @@ function messageText(m: (typeof messages.value)[number]): string {
   return s.toLowerCase();
 }
 
+const baseMessages = computed(() =>
+  messages.value.filter((m) => {
+    if (m.type === 'user' || m.type === 'assistant') return m.message?.content != null && m.message.content !== '';
+    if ((m.type === 'tool_result' || m.toolUseResult) && display.showToolResult) return true;
+    return false;
+  }),
+);
 const visibleMessages = computed(() => {
   const term = msgQ.value.trim().toLowerCase();
-  return messages.value.filter((m) => {
-    const isContent = (m.type === 'user' || m.type === 'assistant' ? m.message?.content != null && m.message.content !== '' : m.type === 'tool_result' || !!m.toolUseResult);
-    if (!isContent) return false;
-    return !term || messageText(m).includes(term);
-  });
+  if (!term) return baseMessages.value;
+  return baseMessages.value.filter((m) => messageText(m).includes(term));
 });
-const totalMessages = computed(() => messages.value.filter((m) => m.type === 'user' || m.type === 'assistant' || m.type === 'tool_result' || m.toolUseResult).length);
+const totalMessages = computed(() => baseMessages.value.length);
+
+const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: display.showToolResult, thinking: display.showThinking }));
 </script>
 
 <template>
@@ -304,14 +335,33 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
       <div class="sticky top-0 bg-[#1a1a1a] p-2 border-b border-[#333] z-[1]">
         <div class="flex items-center mb-2">
           <div class="text-[#8ab4f8] text-[15px] flex-1">Claude sessions</div>
+          <NPopover trigger="click" placement="bottom-end" :width="280">
+            <template #trigger>
+              <button class="icon-btn" title="显示与排序设置">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+              </button>
+            </template>
+            <div class="ds">
+              <div class="ds-row"><span class="ds-lbl">目录排序</span><NSelect v-model:value="display.dirSort" :options="dirSortOptions" size="small" class="flex-1" /></div>
+              <div class="ds-row"><span class="ds-lbl">session 排序</span><NSelect v-model:value="display.sessionSort" :options="sessionSortOptions" size="small" class="flex-1" /></div>
+              <div class="ds-divider">时间线显隐</div>
+              <div class="ds-checks">
+                <NCheckbox :checked="display.showToolUse" @click="onCheck($event, 'showToolUse', timelineGroup)">工具调用</NCheckbox>
+                <NCheckbox :checked="display.showToolResult" @click="onCheck($event, 'showToolResult', timelineGroup)">工具结果</NCheckbox>
+                <NCheckbox :checked="display.showThinking" @click="onCheck($event, 'showThinking', timelineGroup)">思考</NCheckbox>
+              </div>
+              <div class="ds-divider">侧栏显隐</div>
+              <div class="ds-checks">
+                <NCheckbox :checked="display.showCountBadge" @click="onCheck($event, 'showCountBadge', sidebarGroup)">计数徽章</NCheckbox>
+                <NCheckbox :checked="display.showSessionSub" @click="onCheck($event, 'showSessionSub', sidebarGroup)">session 子标题</NCheckbox>
+              </div>
+            </div>
+          </NPopover>
           <button v-if="expanded.size" class="icon-btn" title="全部收起" @click="expanded = new Set()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11l5-5 5 5M7 17l5-5 5 5" /></svg>
           </button>
         </div>
-        <div class="flex items-center gap-2">
-          <NInput v-model:value="search" placeholder="搜索目录或 session…" size="small" clearable class="flex-1" />
-          <NSelect v-model:value="sortRule" :options="sortOptions" size="small" class="w-[92px]" />
-        </div>
+        <NInput v-model:value="search" placeholder="搜索目录或 session…" size="small" clearable />
       </div>
       <div class="p-2">
         <div v-if="projectsQuery.isLoading.value" class="empty"><NSpin size="small" /></div>
@@ -321,7 +371,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
             <div v-if="node.show" class="item project" @click="toggle(node.p)">
               <svg class="caret" :class="{ open: node.open }" width="10" height="10" viewBox="0 0 10 10"><path d="M2 1 L8 5 L2 9 Z" fill="currentColor" /></svg>
               <span class="title" v-html="hl(node.p.cwd, q)" />
-              <span class="count-badge">{{ node.p.sessionCount }}</span>
+              <span v-if="display.showCountBadge" class="count-badge">{{ node.p.sessionCount }}</span>
             </div>
             <div v-if="node.show && node.open" class="sub-tree">
               <div
@@ -332,7 +382,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
                 @click.stop="selectSession(node.p.dirName, s)"
               >
                 <div class="title" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
-                <div class="sub">{{ sessionSub(s) }}</div>
+                <div v-if="display.showSessionSub" class="sub">{{ sessionSub(s) }}</div>
               </div>
             </div>
           </template>
@@ -364,7 +414,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
                 <button class="ask" @click="askStep(m)">🔍问</button>
               </div>
-              <div class="body" v-html="renderContent(m.message?.content, msgQ)" />
+              <div class="body" v-html="renderContent(m.message?.content, msgQ, renderOpts)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
               <div class="role">tool<button class="ask" @click="askStep(m)">🔍问</button></div>
@@ -376,7 +426,7 @@ const totalMessages = computed(() => messages.value.filter((m) => m.type === 'us
         <div v-for="b in studyBlocks" :key="'s' + b.id" class="msg study live">
           <div class="role">🔍 深问</div>
           <div class="study-q">{{ b.question }}</div>
-          <div v-if="b.thinking" class="thinking">{{ b.thinking }}</div>
+          <div v-if="b.thinking && display.showThinking" class="thinking">{{ b.thinking }}</div>
           <template v-for="t in b.tools" :key="t.id"><div v-html="t.html"></div></template>
           <div v-if="b.bodyHtml" class="body" v-html="b.bodyHtml" />
           <div v-else-if="b.bodyText" class="body">{{ b.bodyText }}</div>
