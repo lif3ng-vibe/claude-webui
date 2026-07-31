@@ -150,9 +150,13 @@ lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon
 
 ## 8. 运行
 
-- **开发**：后端 `npm run dev`（3000，API）+ 前端 `cd web && npm run dev`（Vite 5173，代理 `/api` 到 3000）。UI 用 http://localhost:5173。
+- **web 开发**：后端 `npm run dev`（3000，API）+ 前端 `cd web && npm run dev`（Vite 5173，代理 `/api` 到 3000）。UI 用 http://localhost:5173。
 - **单进程构建**：`npm run build:web` → 后端 `npm run dev` serve `web/dist`（http://localhost:3000）。
-- 测试：`npm test`（29 测试）；类型检查：`npm run typecheck` + `cd web && npm run typecheck`。
+- **桌面端开发**：
+  - Electron：先 `npm run dev`（sidecar 3000）+ `cd web && npm run dev`（Vite 5173），再 `npm run dev:electron`（窗口指 5173）。
+  - Tauri：`npm run dev:tauri`（Rust 自己拉起 sidecar tsx@3000，beforeDevCommand 起 Vite 5173）。
+- **桌面端构建**：`npm run build:server`（esbuild 打包 `src/server` → `dist-server/server.js`）；`npm run build:electron`（web+server+electron-builder `--dir`，未做安装包）；`npm run build:tauri`（tauri build）。
+- 测试：`npm test`（29 测试）；类型检查：`npm run typecheck` + `cd web && npm run typecheck` + `tsc -p electron/tsconfig.json`。
 
 ## 9. v2（动手前先回来和用户确认）
 
@@ -161,3 +165,35 @@ lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon
 - 常驻交互执行模型（B）+ WebSocket 双向。
 - SQLite 持久化（对话多到要搜索/分页时）。
 - `memory/` 浏览器、stats dashboard、history-prompt 视图。
+
+## 10. 客户端（Electron + Tauri）
+
+同时提供 Electron 与 Tauri 两种桌面构建，验证"同一套 web 前端被 web / Electron / Tauri 三种运行时承载"的兼容方式；新窗口功能三端均可用；现有 web 功能不变。
+
+### 10.1 架构决策（已确认）
+- **统一 Sidecar**：Node 后端在两端都作为独立 HTTP 子进程被 shell 拉起，前端统一加载 `http://localhost:<port>/`，两端对称。dev 用 `tsx` 跑源码（PORT=3000 对齐 Vite proxy），prod 用 `node dist-server/server.js`（PORT=0）。
+- **共享产物**：`npm run build:server` 用 esbuild 把 `src/server` 打成单个 ESM `dist-server/server.js`（`@anthropic-ai/sdk` 纯 JS 可打包）。`src/server/index.ts` 的 `WEB_DIR`/`DIST_DIR` 改为 env 可覆盖（`CLAUDE_WEBUI_WEB_DIR`/`CLAUDE_WEBUI_BUNDLE`），因打包后 `import.meta.url` 指向 bundle 目录。`server.listen` 握手：`CLAUDE_WEBUI_HANDSHAKE=1` 时首行 stdout 写 `CLAUDE_WEBUI_PORT=<实际端口>`（绑 port 0 时用 `server.address().port`）；日志写 stderr JSON。
+- **Node 按需下载**：优先系统 `node`（≥18）；缺失则下载固定 Node 22 LTS 到 `~/.claude-webui/cache/`。源默认官方 `nodejs.org/dist`，npmmirror 备选；SHA256 校验；系统 `tar -xf` 解压。Electron 用 JS、Tauri 用 Rust（reqwest+sha2），两端对称。
+- **端口 0 + 单实例 + 新窗口复用**：sidecar 绑端口 0、握手回传实际端口；二次启动唤出已有主窗口；`openWindow` 在同 shell 内创建新 OS 窗口指同端口，不另起 sidecar。
+- **兼容性接口**：shell 在页面加载前注入 `window.__claudeWebuiDesktop = { kind, openWindow, minimize, toggleMaximize, close, setAlwaysOnTop, isAlwaysOnTop, service: { status, start, stop, restart, getLogs, onLog } }`。Electron 用 preload+`contextBridge`；Tauri 用 `initialization_script` 包 `__TAURI__`（`withGlobalTauri:true`）。web 下不存在 → `openWindow` 回退 `window.open`，标题栏/服务页隐藏。前端 `web/src/lib/desktop.ts` 读该对象暴露 `isDesktop`/`openWindow`/窗口控制/`alwaysOnTop`；`openWindow.ts` 转发到它，6 处调用点签名不变。
+- **无边框自定义标题栏**：`web/src/components/TitleBar.vue`（原生按钮+内联 SVG，非 NButton），主+新窗口都用；Windows 风格右对齐 `[📌置顶][—最小][□最大化][✕关闭]`；拖拽容器同时挂 `-webkit-app-region:drag` 与 `data-tauri-drag-region`，按钮 `no-drag`；标题取 `document.title`（`MutationObserver` 监 `<title>`）。挂在 `App.vue` 的 `<router-view/>` 之上，`MainApp`/`ItemLayout` 的 `h-screen` 改 `h-full`。
+- **窗口状态按路由持久化**：`~/.claude-webui/window-state.json` 按路由存 `{width,height,x,y,alwaysOnTop}`，新建窗口还原。
+- **服务管理页**：`web/src/views/ServicePage.vue` + 路由 `/service` + MainApp 第三 tab"服务"（`v-if="isDesktop"`）。状态 2s 轮询（`useIntervalFn`）+ 启停/重启按钮；日志 `getLogs()` 历史 + `onLog` 实时 tail（截 5000、自动滚底）。**走 bridge 与 shell 通信，不经 `/api`**——后端挂掉仍可操作。日志 shell 内存环形（~5000）+ 落盘 `~/.claude-webui/logs/sidecar.log`；重启后 shell 把所有窗口 reload 到新端口。
+- **托盘**：复用 favicon SVG。关最后窗口→缩托盘（app+sidecar 存活）；菜单 = 显示主窗口 / 重启后端 / 停止后端 / 退出；停止后端 ≠ 退 app；托盘跨后端重启常驻。
+
+### 10.2 文件
+- 改：`src/server/index.ts`、`web/src/lib/openWindow.ts`、`web/src/App.vue`、`web/src/stores/ui.ts`、`web/src/views/MainApp.vue`、`web/src/views/ItemLayout.vue`、`web/src/router/index.ts`、根 `package.json`、根 `tsconfig.json`、`.gitignore`。
+- 新：`web/src/lib/desktop.ts`、`web/src/components/TitleBar.vue`、`web/src/views/ServicePage.vue`、`scripts/build-server.mjs`、`scripts/dev-electron.mjs`、`scripts/build-electron.mjs`、`electron/{main,preload}.ts`+`tsconfig.json`、`src-tauri/`（`tauri.conf.json`、`Cargo.toml`、`src/{lib,nodedl,sidecar,window_state}.rs`、`capabilities/default.json`）、`.cargo/config.toml`（国内 crates 镜像 rsproxy）。
+
+### 10.3 待办 / 风险
+- 完整 dev/prod 运行时验证（dev:electron 三终端、dev:tauri、各自 prod 产物、托盘、单实例、按需下载）需桌面机实测。
+- Tauri prod 把 `dist-server`/`web/dist` 作 `bundle.resources`，sidecar 从 `resource_dir` 读；Electron prod 把它们打进 `files`。
+- 安装包/签名未做（`electron-builder --dir` + `tauri build` 仅出 unpacked/产物）。
+- dev 下 Electron sidecar 固定 3000，勿与 web 流程的 3000 同时占用。
+
+### 10.4 GitHub CI（`.github/workflows/build-desktop.yml`）
+- 触发：`push tag v*`（自动建 Release）+ `workflow_dispatch`（手动，仅 artifact）。
+- per-OS 矩阵（`windows-latest` + `macos-latest`）× {Electron, Tauri} = 4 job，各自原生出包；macOS 上交叉 arch（Electron universal dmg / Tauri `--target universal-apple-darwin`），一份覆盖 Intel+Apple Silicon。Windows 出 nsis/msi（x64）。全部未签名。
+- 脚本：Electron 用 `npm run dist:electron`（`electron-builder --publish never`，installer）；Tauri 用 `tauri build [--target universal-apple-darwin]`。CI 装根 + web 两套依赖。
+- `release` job 仅 tag 触发，用 `softprops/action-gh-release` 汇总所有 `.dmg/.exe/.msi` 上传。
+- 本地 `.cargo/config.toml`（国内 rsproxy 镜像）已 gitignore，CI 走默认 crates.io。

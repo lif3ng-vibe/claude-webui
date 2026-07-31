@@ -1,0 +1,100 @@
+name: build-desktop
+
+# 打 tag v* 自动构建 Win+Mac 安装包并建 Release；平时可手动 workflow_dispatch 触发（产物作为 artifact 下载，不建 Release）。
+# 说明：electron-builder 与 tauri 都不支持在单一 OS 上可靠交叉打包另一 OS 的安装包，
+# 故用 per-OS 矩阵 runner（windows-latest / macos-latest）各自原生出包；
+# macOS 上再交叉 arch（Electron universal dmg / Tauri universal-apple-darwin），一份安装包覆盖 Intel + Apple Silicon。
+# 全部未签名（无证书）：mac 首次打开需右键 → 打开（Gatekeeper 警告），Win 弹 SmartScreen。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  electron:
+    name: electron / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm --prefix web ci
+      - run: npm run dist:electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS 未签名：不设 CSC_LINK/CSC_KEY_PASSWORD，产出未签名 universal dmg。
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-${{ matrix.os }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*-mac.zip
+          if-no-files-found: true
+
+  tauri:
+    name: tauri / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 安装 mac universal 的两个 rust target
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npm --prefix web ci
+      - name: tauri build（mac universal，未签名）
+        if: runner.os == 'macOS'
+        run: npx tauri build --target universal-apple-darwin
+      - name: tauri build（windows，未签名）
+        if: runner.os == 'Windows'
+        run: npx tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-${{ matrix.os }}
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: true
+
+  release:
+    name: 发布 Release（仅 tag 触发）
+    needs: [electron, tauri]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+          fail_on_unmatched_files: true
+          generate_release_notes: true
