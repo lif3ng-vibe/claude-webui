@@ -76,6 +76,20 @@
 - favicon（蓝紫渐变 + 终端提示符 SVG）。
 - session 消息加载/刷新后滚到底 + 回到顶部按钮。
 
+### 4.10 新窗口打开 + per-page title/favicon
+- 主页 `/` 不引入路由切换，Sessions/Chat 仍由 Pinia `ui.view` 顶栏 tab 驱动，URL 恒为 `/`。
+- "新窗口打开" = 把某列表项弹成**精简单页 shell**（独立窗口）：只渲染该项 + 其全部操作，无 Sessions/Chat 顶栏，不能切同级列表项；父子可下钻，顶栏"← 返回"仅父子钻取间出现（按 `window.history.position > 0` 判定）。
+- 路由（vue-router，**history 模式**）：
+  - `/projects/:dir` —— 单工作目录（session 列表 + 搜索/排序），下钻到 session。
+  - `/projects/:dir/sessions/:sid` —— 单 session（时间线 + 续接 + 深问入口）；深问落库后同窗口钻取到 `/conversations/:id`。
+  - `/conversations/:id` —— 单对话（查看 + 追问，kind=chat/study 决定 title/favicon）。
+  - `:dir` 用 pathEncoding 的 encoded 形式，与 `/api/projects/:dir/...` 对齐。
+- 触发点（主页 + 精简 shell 都有）：每个工作目录/session/对话历史行有 ↗ 按钮；主页内联展开某项时 header 有 ↗；精简 shell 内同样保留各项操作按钮（📋 复制 resume、刷新、时间线显隐设置、provider/预设/系统提示词、删除等）与 ↗，新窗口可继续打开新窗口。同窗内不切同级列表项；↗ 开的是独立新窗口，不违反此规则。
+- title/favicon 纯客户端动态（`router.beforeEach` 按 pattern 设 type 级，页面加载数据后细化 title；conversation 按 kind 切 favicon）。favicon 集：home 终端提示符 / dir 文件夹 / session 终端+光标块 / chat 气泡 / study 放大镜，统一蓝紫渐变 16×16 SVG。
+- `openWindow(path)` 抽象层（web 用 `window.open`，桌面端只改这一处）。
+- 跨窗口状态同步：BroadcastChannel 广播 mutation → 其他窗口 `queryClient.invalidateQueries` 重新拉；`/api/running` 忙/闲由 3s 轮询驱动天然跨窗口一致。
+- 桌面端兼容：客户端启动拉起本地 node server（serve 前端 + SPA fallback + `/api`），窗口加载 `http://localhost:<port>/`，history 模式白拿；title 映射 OS 窗口标题，favicon 无标签页则降级。
+
 ## 5. 读取/展示范围
 
 只读 `~/.claude/projects/**` + `~/.claude/sessions/**`（运行状态）。`history.jsonl`/`stats-cache.json`/`memory/`/`settings*`/`mcp.json`/`plans`/`tasks` 全部 defer。
@@ -100,13 +114,20 @@ server/index.ts         # node:http，所有 /api/* 端点 + SSE
 ### 前端（`web/`，Vue 3 + Vite + TS）
 ```
 components/
-  SessionsView.vue   # Sessions 读侧 + 续接 + 深问 + 多选 + 拖动框选 + 运行状态
-  ChatView.vue       # 对话 + 历史/加载/追问 + provider 选择
+  SessionsView.vue   # Sessions 读侧 + 续接 + 深问 + 多选 + 拖动框选 + 运行状态 + ↗ 触发点
+  ChatView.vue       # 对话 + 历史/加载/追问 + provider 选择 + ↗ 触发点
   ProviderSettings.vue # 多 provider 配置弹窗
+views/               # vue-router 双布局（history 模式）
+  MainApp.vue        # 主页 / （顶栏 Sessions/Chat tab，不走路由）
+  ItemLayout.vue     # 精简 shell（仅父子钻取间显示"← 返回"）
+  DirPage.vue        # /projects/:dir 单工作目录
+  SessionPage.vue    # /projects/:dir/sessions/:sid 单 session
+  ConversationPage.vue # /conversations/:id 单对话 + 追问
+router/index.ts      # 路由表 + beforeEach 设 type 级 title/favicon
 stores/
   session.ts  ui.ts  display.ts   # Pinia；display 用 useStorage 持久化到 localStorage
 composables/useConfig.ts  # /api/config
-lib/{render,sse,shiki}.ts
+lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon；openWindow=新窗口抽象；broadcast=跨窗口失效
 ```
 
 ## 7. 端点

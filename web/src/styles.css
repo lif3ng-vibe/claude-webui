@@ -98,6 +98,8 @@ details > pre { margin: 4px 0 4px 14px; }
 .sess-head { display: flex; align-items: center; gap: 4px; }
 .icon-btn-sm { flex-shrink: 0; background: none; border: none; color: #888; cursor: pointer; padding: 2px 4px; font-size: 13px; }
 .icon-btn-sm:hover { color: #8ab4f8; }
+.popout { opacity: 0.45; }
+.popout:hover { opacity: 1; }
 .conv-head { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
 .conv-list { margin-top: 6px; }
 .conv-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; }

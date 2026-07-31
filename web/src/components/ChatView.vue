@@ -6,6 +6,8 @@ import { api, saveConversation, deleteConversation, type ConversationSummary } f
 import { renderContent } from '../lib/render';
 import { readSSE } from '../lib/sse';
 import { useConfig } from '../composables/useConfig';
+import { openWindow } from '../lib/openWindow';
+import { broadcastInvalidate } from '../lib/broadcast';
 
 const promptsQuery = useQuery({ queryKey: ['prompts'], queryFn: api.prompts });
 const prompts = computed(() => promptsQuery.data.value ?? []);
@@ -57,6 +59,7 @@ async function saveCurrent(): Promise<void> {
   const title = (chatMsgs.value[0]?.content || '新对话').slice(0, 40);
   await saveConversation({ id, kind: 'chat', title, systemPrompt: systemPrompt.value.trim() || undefined, providerId: selectedProviderId.value || undefined, messages });
   await conversationsQuery.refetch();
+  broadcastInvalidate([['conversations'], ['conversation', id]]);
 }
 
 async function loadConv(s: ConversationSummary): Promise<void> {
@@ -81,10 +84,15 @@ function newChat(): void {
   conversationId.value = '';
 }
 
+function popConversation(c: ConversationSummary): void {
+  openWindow(`/conversations/${encodeURIComponent(c.id)}`);
+}
+
 const showHistory = ref(true);
 async function delConv(c: ConversationSummary): Promise<void> {
   await deleteConversation(c.id);
   await conversationsQuery.refetch();
+  broadcastInvalidate([['conversations'], ['conversation', c.id]]);
 }
 
 watch(
@@ -167,12 +175,17 @@ async function sendChat(): Promise<void> {
         <div v-for="c in conversations" :key="c.id" class="conv-item" :class="{ active: c.id === conversationId }" @click="loadConv(c)">
           <div class="conv-title">{{ c.title }}<span class="conv-kind">{{ c.kind === 'study' ? '深问' : '聊天' }}</span></div>
           <div class="conv-meta">{{ new Date(c.updatedAt).toLocaleString() }}</div>
+          <button class="conv-del popout" title="新窗口打开" @click.stop="popConversation(c)">↗</button>
           <button class="conv-del" @click.stop="delConv(c)">🗑</button>
         </div>
       </div>
     </aside>
 
     <main class="min-h-0 flex flex-col overflow-hidden">
+      <div class="px-4 pt-3 pb-1 flex items-center gap-2">
+        <div class="text-[12px] text-[#888] flex-1 truncate">{{ conversations.find((x) => x.id === conversationId)?.title || '新对话' }}</div>
+        <button v-if="conversationId" class="ask" title="新窗口打开该对话" @click="popConversation({ id: conversationId } as ConversationSummary)">↗</button>
+      </div>
       <div ref="chatTimelineRef" class="flex-1 min-h-0 overflow-auto px-4 py-3">
         <div v-if="!chatMsgs.length" class="empty">发一条消息开始对话…</div>
         <div v-for="m in chatMsgs" :key="m.id" :class="['msg', m.role]">

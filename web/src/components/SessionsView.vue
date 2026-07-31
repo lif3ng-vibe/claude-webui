@@ -8,6 +8,8 @@ import { useDisplayStore } from '../stores/display';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
 import { renderContent, renderTool, renderMd, hl, fmtBytes, fmtTime, esc } from '../lib/render';
 import { readSSE, type SSEEvent } from '../lib/sse';
+import { openWindow } from '../lib/openWindow';
+import { broadcastInvalidate } from '../lib/broadcast';
 
 const store = useSessionStore();
 const search = ref('');
@@ -81,6 +83,13 @@ function onCheck(e: MouseEvent, key: BoolKey, group: BoolKey[]): void {
   } else {
     d[key] = !d[key];
   }
+}
+
+function popDir(p: ProjectEntry): void {
+  openWindow(`/projects/${encodeURIComponent(p.dirName)}`);
+}
+function popSession(dir: string, sid: string): void {
+  openWindow(`/projects/${encodeURIComponent(dir)}/sessions/${encodeURIComponent(sid)}`);
 }
 
 function toggle(p: ProjectEntry): void {
@@ -350,6 +359,7 @@ async function studyStream(dir: string, sid: string, steps: unknown[], question:
       scrollTick.value++;
     });
     if (b.bodyText) b.bodyHtml = renderMd(b.bodyText);
+    broadcastInvalidate([['conversations']]);
   } catch (e) {
     b.bodyText += `\n[error] ${String(e)}`;
   }
@@ -474,6 +484,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <span class="title" :title="node.p.cwd" v-html="hl(node.p.cwd, q)" />
               <span v-if="display.showDirTime" class="dir-time">{{ fmtTime(node.p.latestMtimeMs) }}</span>
               <span v-if="display.showCountBadge" class="count-badge">{{ node.p.sessionCount }}</span>
+              <button class="icon-btn-sm popout" title="新窗口打开该目录" @click.stop="popDir(node.p)">↗</button>
             </div>
             <div v-if="node.show && node.open" class="sub-tree">
               <div
@@ -486,6 +497,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 <div class="sess-head">
                   <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
                   <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)">📋</button>
+                  <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(node.p.dirName, s.sessionId)">↗</button>
                 </div>
                 <div v-if="runningMap.has(s.sessionId)" class="run-badge" :class="runningMap.get(s.sessionId)"><span class="run-dot"></span>{{ runLabel(runningMap.get(s.sessionId)) }}</div>
                 <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>
@@ -499,6 +511,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
     <main class="relative min-h-0 flex flex-col overflow-hidden">
       <div class="px-4 pt-3 pb-2 flex items-center gap-2">
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
+        <button v-if="store.sessionId" class="ask" title="新窗口打开该 session" @click="popSession(store.dirName, store.sessionId)">↗</button>
         <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
         <button v-if="selectedMsgs.size" class="ask" @click="clearSelection()">取消选中</button>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
