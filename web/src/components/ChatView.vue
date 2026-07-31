@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
-import { NSelect } from 'naive-ui';
-import { api } from '../api';
+import { NSelect, useMessage } from 'naive-ui';
+import { api, saveConversation, type ConversationSummary } from '../api';
 import { renderMd } from '../lib/render';
 import { readSSE } from '../lib/sse';
 import { useConfig } from '../composables/useConfig';
@@ -43,6 +43,43 @@ interface ChatMsg {
 }
 const chatMsgs = ref<ChatMsg[]>([]);
 let chatId = 0;
+
+const msg = useMessage();
+const conversationsQuery = useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
+const conversations = computed(() => (conversationsQuery.data.value ?? []).filter((c) => c.kind === 'chat'));
+const conversationId = ref<string>('');
+
+async function saveCurrent(): Promise<void> {
+  if (!chatMsgs.value.length) return;
+  const id = conversationId.value || crypto.randomUUID();
+  conversationId.value = id;
+  const messages = chatMsgs.value.map((m) => ({ role: m.role, content: m.role === 'user' ? m.content : m.bodyText }));
+  const title = (chatMsgs.value[0]?.content || '新对话').slice(0, 40);
+  await saveConversation({ id, kind: 'chat', title, systemPrompt: systemPrompt.value.trim() || undefined, providerId: selectedProviderId.value || undefined, messages });
+  await conversationsQuery.refetch();
+}
+
+async function loadConv(s: ConversationSummary): Promise<void> {
+  const c = await api.conversation(s.id);
+  chatMsgs.value = c.messages.map((m) => ({
+    id: chatId++,
+    role: m.role,
+    content: m.role === 'user' ? String(m.content ?? '') : '',
+    bodyText: m.role === 'assistant' ? String(m.content ?? '') : '',
+    thinking: '',
+    bodyHtml: m.role === 'assistant' ? renderMd(m.content) : '',
+    requests: [],
+  }));
+  conversationId.value = c.id;
+  systemPrompt.value = c.systemPrompt || '';
+  if (c.providerId) selectedProviderId.value = c.providerId;
+  msg.success('已加载对话');
+}
+
+function newChat(): void {
+  chatMsgs.value = [];
+  conversationId.value = '';
+}
 
 watch(
   chatScrollTick,
@@ -87,9 +124,11 @@ async function sendChat(): Promise<void> {
       chatScrollTick.value++;
     });
     if (a.bodyText) a.bodyHtml = renderMd(a.bodyText);
+    void saveCurrent();
   } catch (e) {
     if ((e as Error).name !== 'AbortError') a.bodyText += `\n[error] ${String(e)}`;
     if (a.bodyText) a.bodyHtml = renderMd(a.bodyText);
+    void saveCurrent();
   } finally {
     sending.value = false;
     chatAbort.value = null;
@@ -114,6 +153,16 @@ async function sendChat(): Promise<void> {
       />
       <textarea v-model="systemPrompt" class="sys-prompt" placeholder="选择上方预设或自行编辑系统提示词…"></textarea>
       <div class="preset-hint">预置提示词存于 ~/.claude-webui/prompts.json</div>
+      <div class="conv-head">
+        <span class="text-[12px] text-[#888]">对话历史</span>
+        <button class="ask" @click="newChat">+ 新对话</button>
+      </div>
+      <div class="conv-list">
+        <div v-for="c in conversations" :key="c.id" class="conv-item" :class="{ active: c.id === conversationId }" @click="loadConv(c)">
+          <div class="conv-title">{{ c.title }}</div>
+          <div class="conv-meta">{{ new Date(c.updatedAt).toLocaleString() }}</div>
+        </div>
+      </div>
     </aside>
 
     <main class="min-h-0 flex flex-col overflow-hidden">

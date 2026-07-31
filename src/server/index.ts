@@ -7,6 +7,7 @@ import { ClaudeRunner } from '../claude/Runner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
 import { resolveProvider, publicConfig, saveProviders } from '../config.js';
+import { conversations, type Conversation } from '../conversations.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 
@@ -315,6 +316,55 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     // —— session 浏览 / 续接 ——
     if (path === '/api/projects' && req.method === 'GET') return json(res, 200, await reader.listProjects());
     if (path === '/api/running' && req.method === 'GET') return json(res, 200, await reader.getRunningSessions());
+
+    // —— 对话持久化 ——
+    if (path === '/api/conversations' && req.method === 'GET') return json(res, 200, await conversations.list());
+    if (path === '/api/conversations' && req.method === 'POST') {
+      const b = await readBody(req);
+      const now = Date.now();
+      const c: Conversation = {
+        id: String(b.id ?? crypto.randomUUID()),
+        kind: b.kind === 'study' ? 'study' : 'chat',
+        title: String(b.title ?? '新对话'),
+        systemPrompt: b.systemPrompt,
+        model: b.model,
+        providerId: b.providerId,
+        cwd: b.cwd,
+        studySessionId: b.studySessionId,
+        messages: Array.isArray(b.messages) ? b.messages : [],
+        createdAt: Number(b.createdAt ?? now),
+        updatedAt: now,
+      };
+      await conversations.save(c);
+      return json(res, 200, c);
+    }
+    let cm: RegExpMatchArray | null;
+    if ((cm = path.match(/^\/api\/conversations\/([^/]+)$/))) {
+      const id = decodeURIComponent(cm[1]);
+      if (req.method === 'GET') {
+        const c = await conversations.get(id);
+        return c ? json(res, 200, c) : json(res, 404, { error: '对话不存在' });
+      }
+      if (req.method === 'PUT') {
+        const cur = await conversations.get(id);
+        if (!cur) return json(res, 404, { error: '对话不存在' });
+        const b = await readBody(req);
+        const next: Conversation = {
+          ...cur,
+          ...b,
+          id: cur.id,
+          kind: cur.kind,
+          createdAt: cur.createdAt,
+          updatedAt: Date.now(),
+        };
+        await conversations.save(next);
+        return json(res, 200, next);
+      }
+      if (req.method === 'DELETE') {
+        await conversations.remove(id);
+        return json(res, 200, { ok: true });
+      }
+    }
 
     let m: RegExpMatchArray | null;
     if ((m = path.match(/^\/api\/projects\/([^/]+)\/sessions$/)) && req.method === 'GET') {

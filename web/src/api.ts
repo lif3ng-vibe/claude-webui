@@ -48,6 +48,32 @@ export interface RunningSessionInfo {
   updatedAt?: number;
 }
 
+export interface ConversationSummary {
+  id: string;
+  kind: 'chat' | 'study';
+  title: string;
+  updatedAt: number;
+}
+
+export interface ConvMessage {
+  role: 'user' | 'assistant';
+  content: unknown;
+}
+
+export interface Conversation {
+  id: string;
+  kind: 'chat' | 'study';
+  title: string;
+  systemPrompt?: string;
+  model?: string;
+  providerId?: string;
+  cwd?: string;
+  studySessionId?: string;
+  messages: ConvMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ProviderInput {
   id: string;
   name: string;
@@ -80,4 +106,20 @@ export const api = {
   config: () => getJSON<ConfigResponse>('/api/config'),
   prompts: () => getJSON<Array<{ id: string; title: string; text: string }>>('/api/prompts'),
   running: () => getJSON<RunningSessionInfo[]>('/api/running'),
+  conversations: () => getJSON<ConversationSummary[]>('/api/conversations'),
+  conversation: (id: string) => getJSON<Conversation>(`/api/conversations/${id}`),
 };
+
+export async function saveConversation(c: Partial<Conversation> & { id: string; kind: 'chat' | 'study'; title: string; messages: ConvMessage[] }): Promise<Conversation> {
+  const r = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(c),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+export async function deleteConversation(id: string): Promise<void> {
+  const r = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
