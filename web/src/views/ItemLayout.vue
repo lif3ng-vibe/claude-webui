@@ -17,7 +17,7 @@ function goBack(): void {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col">
+  <div class="h-full flex flex-col">
     <div v-if="showBack" class="item-topbar">
       <button class="back-btn" title="返回上层" @click="goBack">← 返回</button>
     </div>
