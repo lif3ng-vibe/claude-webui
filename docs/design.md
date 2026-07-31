@@ -1,99 +1,142 @@
-# claude-webui — Design (v1)
+# claude-webui — Design & Requirements
 
-> Status: design locked via a `grilling` session. This is the shared-understanding spec.
+> 本文件是随 git 仓库走的**正式需求/设计文档**。新 Claude 会话读这里即可获取原始需求与当前状态。代码以本文件为准；`~/.claude/projects/<cwd>/memory/` 下的项目记忆是本地镜像，可能滞后。
 
-## Purpose
+## 1. 定位
 
-A **local, single-user, no-auth** web tool with two capabilities in one UI:
+**本地、单用户、无鉴权**的 web 工具，把两件事放一个 UI：
 
-1. **Claude session viewer + continuer** — read `~/.claude/projects/**`, browse working dirs → sessions → message timeline; continue a session or send it an instruction by wrapping the `claude` CLI.
-2. **Anthropic chat + session-step deep-study** — plain chat with a library of preset system prompts (test model capabilities across the Anthropic model family); and "ask the LLM about a step in a Claude session" using **read-only** filesystem tools so the LLM can read real files to explain it.
+1. **Claude session 查看与续接** —— 只读 `~/.claude/projects/**`，浏览工作目录 → session → 消息时间线；可续接一个 session 或向它发指令（包 `claude` CLI）。
+2. **Anthropic 对话 + session 步骤深问** —— 纯对话（预置系统提示词库，跨模型测能力）；"就 session 里某一步向 LLM 提问"，用**只读**磁盘工具让 LLM 读真实文件解释。
 
-## Hard rules
+## 2. 硬规则（不可违反）
 
-- `~/.claude` is **read-only**. Never write back to session jsonl / `history.jsonl`.
-- API keys live **only in the backend**; the browser never sees raw keys.
-- Secrets (`settings*.json`, `mcp.json`, `.env`, `.ssh`, `.gnupg`) are never read or displayed.
+- `~/.claude` **只读**，绝不写回 session jsonl / `history.jsonl`。
+- API key 只存在后端，前端永不接触原始 key；密钥不回传（GET 只给 `hasAuth` 布尔）。
+- 永不读取或显示敏感文件：`settings*.json` / `mcp.json` / `.env` / `.ssh` / `.gnupg`。
+- 续接 session 前置：每个 `sessionId` 加锁，禁止并发写同一 session（并发写 = session 分叉的根因）。
+- 续接以 `--dangerously-skip-permissions` 运行 `claude --resume`，会真实修改目标 session 及其工作目录——UI 发送/复制 resume 前弹确认。
 
-## Resolved decisions
+## 3. 已定决策
 
-| # | Decision | Choice |
-|---|----------|--------|
-| 1 | Audience / deployment | Single-user, pure local, no auth |
-| 2 | Continue-session mechanism | CLI wrap (`claude --resume`), not API rebuild |
-| 3 | Provider half | Plain chat + preset system-prompt library; tool-use only for "study a session step" |
-| 4 | Disk-tool scope | Read-only; range = session cwd + `~/.claude` (read-only). No writes |
-| 5 | CLI execution model | One-shot spawn per instruction (`claude --resume <id> -p ... --output-format stream-json --dangerously-skip-permissions`); per-`sessionId` lock. `--resume` does not fork by default |
-| 6 | Permissions | Full `--dangerously-skip-permissions`; `ClaudeRunner` accepts `allowedTools`/`disallowedTools` (default empty = skip). Whitelist mode is a config switch |
-| 7 | Providers | Anthropic only (chat + prompt tests + tool study); `Provider` interface reserved for extension |
-| 8 | Backend runtime | Node + TypeScript |
-| 9 | Frontend stack | Vue 3 + Vite + TS; Naive UI shell + markdown-it + Shiki + @tanstack/vue-virtual + custom message/tool-call components; Pinia + @tanstack/vue-query |
-| 10 | Chat UI route | Compose (no chat-specific lib) — `assistant-ui` is React-only, a known cost of choosing Vue |
-| 11 | Transport / storage | SSE; JSON files under `~/.claude-webui/` (`config.json`, `prompts.json`, `conversations/<id>.json`) |
+| # | 决策 | 选择 |
+|---|------|------|
+| 1 | 受众/部署 | 单用户、纯本地、无鉴权 |
+| 2 | 续接机制 | CLI 包裹（`claude --resume`），不重建消息发 API |
+| 3 | provider 半边 | 纯对话 + 预置系统提示词库；工具调用只用于"就 session 步骤深问" |
+| 4 | 磁盘工具作用域 | 只读；范围 = session cwd + `~/.claude`（只读）。无写入 |
+| 5 | CLI 执行模型 | 每条指令一次性 spawn `claude --resume <id> -p ... --output-format stream-json --dangerously-skip-permissions`；prompt 经 stdin 传入（非参数，避免 shell 注入）；per-`sessionId` 锁。`--resume` 默认不 fork（沿用同一 sessionId） |
+| 6 | 权限 | 全开 `--dangerously-skip-permissions`；`ClaudeRunner` 接 `allowedTools`/`disallowedTools`（默认空 = skip），白名单是配置开关 |
+| 7 | providers | v1 只 Anthropic（对话/提示词测试/工具查证全走 Anthropic，家族内多模型对比）；多 provider **配置**已做（页面管理 + 持久化 + 切换），纯对话多 provider 可用；工具查证跨家仍只 Anthropic 兼容 |
+| 8 | 后端运行时 | Node + TypeScript |
+| 9 | 前端栈 | Vue 3 + Vite + TS + UnoCSS + VueUse + Naive UI + Pinia + @tanstack/vue-query + markdown-it + Shiki |
+| 10 | 对话 UI 路线 | 自写（无 chat 专用库）—— `assistant-ui` 只有 React，是选 Vue 的已知代价 |
+| 11 | 传输/存储 | SSE；JSON 文件存 `~/.claude-webui/`（`config.json`、`prompts.json`、`conversations/<id>.json`） |
 
-## Read / display scope (v1)
+## 4. 功能需求（已完成）
 
-Read **only** `~/.claude/projects/**`. Three-level display:
+### 4.1 Sessions 视图（读侧）
+- 三级浏览：工作目录（解码编码目录名 → 真实 cwd，权威 cwd 来自 jsonl `cwd` 字段）→ session 列表（sessionId、最后活动、消息数、首条人类 prompt 预览、大小、最近更新时间）→ 消息时间线。
+- 搜索：关键字过滤目录/session 名称 + **session 内消息内容**搜索；命中高亮（标签间文本插入，不破坏 markdown）；目录命中但无 session 命中不展开；N/M 计数。
+- 排序：目录（最近更新/字母）、session（更新时间/名称/大小）各自可选；最近更新排序由后端 `/api/projects` 返回 `latestMtimeMs`，初始即生效。
+- 展开/收起：三角图标旋转 90° 动画；"全部收起"图标按钮。
+- markdown 渲染（markdown-it）+ Shiki 代码高亮（懒加载 github-dark）；`tool_use`/`tool_result` 用 `<details>` 折叠。
+- 运行中会话状态标记：`/api/running` 读 `~/.claude/sessions/<pid>.json`，列表显示"忙/闲"徽标（busy 绿色脉冲 / idle 灰），3s 轮询。
 
-1. **Working dirs** — list `~/.claude/projects/*` (dir name is an encoding of the cwd). The real cwd is read authoritatively from the `cwd` field inside a session's jsonl messages; the encoded dir name is a fallback only.
-2. **Sessions** — per dir: `sessionId`, last-activity (mtime), message count, first user message as preview, size.
-3. **Message timeline** — per session: user / assistant / tool-call (name + input + truncated result) with timestamps. This timeline also feeds the "select a step to ask about" feature.
+### 4.2 续接 session
+- 选中 session 后底部 composer（textarea + 发送 + 停止，Ctrl/Cmd+Enter）。
+- 发送 → POST `/api/.../run` → SSE 流式：stream-json 按行解析为 assistant/tool/result/exit 的"虚线 live 块"追加到时间线。
+- 若该 session 正在另一终端运行（列表显示忙/闲），点继续弹"可能分叉"警告。
 
-Deferred: `history.jsonl`, `stats-cache.json`, `memory/`, `settings*`/`mcp.json`, `plans`, `tasks`.
+### 4.3 深问（就 session 步骤向 LLM 提问）
+- 每条 user/assistant/tool 消息有 🔍问 按钮 → 弹问题 → POST `/api/study` → agent 循环（模型调 `read_file`/`list_files`/`grep` 只读工具 → 执行 → 回填 `tool_result` → 继续，最多 12 轮）→ 流式显示思考/工具/正文。
+- 多选若干步一起问：勾选框（可显隐配置）+ Shift 范围选中（仅当上次变化是选中时生效）+ 鼠标拖动矩形框选相交消息 + 选中消息整行淡紫底色。
+- 深问也持久化为对话（kind `study`），进对话历史列表。
 
-## Path encoding
+### 4.4 Anthropic 对话（Chat 视图）
+- Sessions/Chat 顶部切换；Chat 左栏 Provider 选择 + 系统提示词编辑 + 预置提示词库（增删，存 `~/.claude-webui/prompts.json`）。
+- 流式对话：thinking 灰块 + 正文（markdown）+ 发送/停止；多轮历史回传；model/baseURL 信息显示。
+- **多 provider 配置**：⚙️ 设置弹窗管理 provider（增删改 + 设活动），`providers` 数组 + active + env 内置"默认(env)"兜底；GET/PUT `/api/config` 持久化，密钥不回传；Chat 选 provider。
 
-Claude Code encodes a cwd into the projects dir name by replacing each `/`, `\`, and `:` with `-`:
+### 4.5 对话持久化（chat + 深问）
+- 每条对话存 `~/.claude-webui/conversations/<id>.json`（kind `chat`/`study`，含 messages）。
+- 对话历史列表：左侧"对话历史"，标聊天/深问；点列表项加载查看；可**追问**（接着发，追加到同一对话）；列表项可**删除**（🗑）、可**隐藏**（▾ 折叠）。
 
-- `C:\Users\lif3n\src\claude-webui` → `C--Users-lif3n-src-claude-webui`
-- Case is preserved; literal `-` in folder names is preserved.
+### 4.6 可查看完整请求
+- 发给 provider 的完整请求（model/max_tokens/system/messages/tools）作为一个 `request` 事件随 SSE 发回前端；UI 里"请求 #N"折叠查看。深问多轮会有多个请求。
 
-Decoding is **ambiguous** (a literal `-` is indistinguishable from a separator), so the authoritative cwd comes from the jsonl `cwd` field, not from decoding. `encodeCwd` is unit-tested against known mappings.
+### 4.7 复制 resume 命令
+- 每个 session 行有 📋 按钮，复制 `cd "<cwd>" && claude --resume <sessionId>` 到剪贴板；若该 session 正在运行，弹分叉警告。
 
-## Module skeleton
+### 4.8 显示/排序设置（持久化）
+- 设置弹窗：时间线显隐（工具调用/工具结果/思考/复选框）、侧栏显隐（计数徽章/session 子标题/目录更新时间）、目录排序、session 排序。
+- Ctrl/Cmd 点击复选框 = 该组内只选当前一项。偏好持久化到 localStorage（VueUse `useStorage`）。
 
+### 4.9 其他
+- favicon（蓝紫渐变 + 终端提示符 SVG）。
+- session 消息加载/刷新后滚到底 + 回到顶部按钮。
+
+## 5. 读取/展示范围
+
+只读 `~/.claude/projects/**` + `~/.claude/sessions/**`（运行状态）。`history.jsonl`/`stats-cache.json`/`memory/`/`settings*`/`mcp.json`/`plans`/`tasks` 全部 defer。
+
+## 6. 架构
+
+### 后端（`src/`，Node + TypeScript）
 ```
-src/
-  claude/
-    pathEncoding.ts   # encodeCwd (+ heuristic decode), unit-tested
-    FileReader.ts     # read-only access to ~/.claude/projects/**
-    Runner.ts         # ClaudeRunner: wraps `claude --resume <id> -p` one-shot
-  provider/
-    Provider.ts       # Provider interface (stream + tool-use)
-    AnthropicProvider.ts  # v1 adapter (stub)
-tests/
-  claude/
-    pathEncoding.test.ts
-    FileReader.test.ts
+config.ts              # 配置：providers 数组 + active + env 兜底；resolveProvider(id)
+conversations.ts        # 对话存储：list/get/save/remove，存 ~/.claude-webui/conversations/
+prompts.ts              # PromptsStore：预置提示词库
+provider/
+  Provider.ts           # Provider 接口（stream + tool-use）；ProviderStreamDelta
+  AnthropicProvider.ts  # v1 adapter：@anthropic-ai/sdk 流式，agent 循环，yield request/messages
+claude/
+  pathEncoding.ts       # encodeCwd（+ 启发式 decode），单测
+  FileReader.ts         # 只读访问 ~/.claude/projects/** + sessions（getRunningSessions）
+  Runner.ts             # ClaudeRunner：包 claude --resume 一次性子进程；streamChildEvents 抽出便于测试
+tools/fsTools.ts        # 只读磁盘工具 read_file/list_files/grep + 路径越界防护
+server/index.ts         # node:http，所有 /api/* 端点 + SSE
+```
+### 前端（`web/`，Vue 3 + Vite + TS）
+```
+components/
+  SessionsView.vue   # Sessions 读侧 + 续接 + 深问 + 多选 + 拖动框选 + 运行状态
+  ChatView.vue       # 对话 + 历史/加载/追问 + provider 选择
+  ProviderSettings.vue # 多 provider 配置弹窗
+stores/
+  session.ts  ui.ts  display.ts   # Pinia；display 用 useStorage 持久化到 localStorage
+composables/useConfig.ts  # /api/config
+lib/{render,sse,shiki}.ts
 ```
 
-## Deferred to v2 (revisit with user before building)
+## 7. 端点
 
-- Multi-provider cross-vendor comparison; format differences (OpenAI-compatible vs Anthropic Messages) — irrelevant for the chat adapter, relevant for tool-use adapters.
-- Disk-tool write capability (sandboxed temp dir).
-- Persistent interactive execution model (B) + WebSocket bidirectional.
-- SQLite persistence (when conversations need search/pagination).
-- `memory/` browser, stats dashboard, history-prompt view.
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/config` | providers + active（不含密钥） |
+| PUT | `/api/config` | 保存 providers |
+| GET | `/api/prompts` / POST / DELETE | 预置提示词库 |
+| GET | `/api/conversations` | 对话列表 |
+| POST | `/api/conversations` | 保存对话 |
+| GET/PUT/DELETE | `/api/conversations/:id` | 单条对话 |
+| GET | `/api/projects` | 工作目录列表（含 latestMtimeMs） |
+| GET | `/api/projects/:dir/sessions` | session 列表 |
+| GET | `/api/projects/:dir/sessions/:sid/messages` | 消息时间线 |
+| POST | `/api/projects/:dir/sessions/:sid/run` | 续接（SSE） |
+| POST | `/api/chat` | 对话（SSE） |
+| POST | `/api/study` | 深问（SSE，含 request/messages 事件） |
+| GET | `/api/running` | 运行中会话状态 |
 
-## 当前进度 / 下一步
+## 8. 运行
 
-> 维护说明：每完成一个里程碑就更新本节。这是**随 git 仓库走**的进度来源；`~/.claude/projects/<cwd>/memory/` 下的项目记忆是本地镜像，可能滞后，以本文件为准。
+- **开发**：后端 `npm run dev`（3000，API）+ 前端 `cd web && npm run dev`（Vite 5173，代理 `/api` 到 3000）。UI 用 http://localhost:5173。
+- **单进程构建**：`npm run build:web` → 后端 `npm run dev` serve `web/dist`（http://localhost:3000）。
+- 测试：`npm test`（29 测试）；类型检查：`npm run typecheck` + `cd web && npm run typecheck`。
 
-**已完成（main 分支，未 push）：**
-- `bad140f` 骨架：设计文档、claude/provider 接口、路径编码单测
-- `a0f0b16` 可运行读侧：HTTP 服务（projects/sessions/messages 只读 API）+ session 浏览查看器 + 搜索高亮
-- `f8c0b52` 续接能力：`ClaudeRunner`（prompt 经 stdin 传入避免注入、Windows 需 `shell:true`）+ SSE `/run` 端点 + per-sessionId 锁 + 前端发指令流式显示
-- `7ee7443` provider 对话：`AnthropicProvider`（SDK 流式，text/thinking/tool_use/done/error，兼容 Anthropic 代理）+ `config`（env 优先、去 `[1m]` 后缀）+ `PromptsStore`（预置提示词库）+ `/api/config|prompts|chat` + 前端 Sessions/Chat 视图切换
-- `c4b9e01` session 步骤深问：`AnthropicProvider` agent 循环（executeTool 回调）+ `fsTools` 只读磁盘工具（read_file/list_files/grep，路径越界防护，作用域 = session cwd + `~/.claude`）+ `/api/study`（SSE）+ 前端每步“🔍问”按钮流式深问
-- `81b5937` 打磨：本地化 markdown-it（`web/vendor`，离线）+ 服务静态资源路由；assistant/对话/深问文本 markdown 渲染；tool_use/tool_result 用 `<details>` 折叠；session 视图“刷新”按钮
-- `5c60852` Vue 前端工具链：前端独立 `web/` 包（Vue 3 + Vite + TS + UnoCSS + VueUse + Naive UI + Pinia + @tanstack/vue-query + markdown-it + Shiki），Vite dev (5173) 代理 `/api` 到后端 3000；Sessions 读侧视图（浏览/搜索/markdown/折叠）已迁 Vue；**开发流变更：UI 用 http://localhost:5173，后端 3000 仅 API**
-- `198fd1a`/`7ae812a`/`a840522`/`f587238` Vue 化全部交互：补读侧小功能（全部收起/刷新）+ Shiki 代码高亮；续接 session（composer + SSE live 块）；深问 🔍问（工具查证流式）；Chat 视图（Sessions/Chat 切换 + 预置提示词 + 系统提示词 + 流式对话 + model 信息）
-- `e115689` `.project` 标题任意折行
-- 收尾：后端 `/` 与静态资源改为 serve `web/dist`（构建产物）+ SPA fallback，未构建时返回开发提示；根 `npm run build:web`；README 写双进程开发与单进程构建两种流程
-- `3ff2b43` session 内消息内容搜索：时间线头部搜索框过滤消息 + 命中高亮（标签间文本插入，不破坏 markdown）+ N/M 计数
-- `1772dda` 多 provider 配置：`providers` 数组 + active + env 内置兜底；⚙️ 设置弹窗管理 provider（增删改/设活动），Chat 选 provider；GET/PUT `/api/config` 持久化，密钥不回传
-- 29 测试通过（后端）；前端 vue-tsc 类型检查通过；与原原生 HTML 功能对齐并扩展
+## 9. v2（动手前先回来和用户确认）
 
-**下一步：**
-- 多 provider 跨家对比的剩余部分：tool-use（深问）跨家仍只 Anthropic 兼容（格式差异），需 adapter 适配；纯对话多 provider 已可用。
-- 其余 v2 项（见 Deferred，动手前先回来和用户确认）：磁盘写入、常驻 B 执行模型 + WS、SQLite、memory/stats/history 视图。
+- 多 provider **工具查证**跨家：OpenAI 兼容 function-calling 格式与 Anthropic tool-use 不同，需 adapter 适配（纯对话多 provider 已可用）。
+- 磁盘工具写入（沙盒临时目录）。
+- 常驻交互执行模型（B）+ WebSocket 双向。
+- SQLite 持久化（对话多到要搜索/分页时）。
+- `memory/` 浏览器、stats dashboard、history-prompt 视图。
