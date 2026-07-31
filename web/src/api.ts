@@ -40,6 +40,14 @@ export interface ConfigResponse {
   activeProviderId: string;
 }
 
+export interface RunningSessionInfo {
+  sessionId: string;
+  cwd: string;
+  status: string;
+  name?: string;
+  updatedAt?: number;
+}
+
 export interface ProviderInput {
   id: string;
   name: string;
@@ -71,4 +79,5 @@ export const api = {
   messages: (dir: string, sid: string) => getJSON<SessionMessage[]>(`/api/projects/${dir}/sessions/${sid}/messages`),
   config: () => getJSON<ConfigResponse>('/api/config'),
   prompts: () => getJSON<Array<{ id: string; title: string; text: string }>>('/api/prompts'),
+  running: () => getJSON<RunningSessionInfo[]>('/api/running'),
 };

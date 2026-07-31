@@ -89,3 +89,12 @@ details > pre { margin: 4px 0 4px 14px; }
 .req-details > pre { max-height: 320px; overflow: auto; font-size: 12px; background: #111; padding: 8px; border-radius: 6px; }
 .sel-cb { margin-right: 6px; cursor: pointer; accent-color: #b388ff; vertical-align: middle; }
 .drag-rect { position: fixed; border: 1px solid #8ab4f8; background: rgba(138, 180, 248, 0.15); pointer-events: none; z-index: 1000; }
+.run-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 2px; }
+.run-badge.busy { color: #34a853; }
+.run-badge.idle { color: #888; }
+.run-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.run-badge.busy .run-dot { animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.sess-head { display: flex; align-items: center; gap: 4px; }
+.icon-btn-sm { flex-shrink: 0; background: none; border: none; color: #888; cursor: pointer; padding: 2px 4px; font-size: 13px; }
+.icon-btn-sm:hover { color: #8ab4f8; }

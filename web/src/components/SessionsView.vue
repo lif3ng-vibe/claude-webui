@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { refDebounced } from '@vueuse/core';
-import { NInput, NSpin, NEmpty, NSelect, NPopover, NCheckbox } from 'naive-ui';
+import { NInput, NSpin, NEmpty, NSelect, NPopover, NCheckbox, useMessage } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
 import { useDisplayStore } from '../stores/display';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
@@ -25,6 +25,22 @@ const messagesQuery = useQuery({
   enabled: computed(() => !!store.sessionId),
 });
 const messages = computed(() => messagesQuery.data.value ?? []);
+
+// 运行中的会话状态（每 3s 轮询），用于在列表标记“进行中”
+const runningQuery = useQuery({ queryKey: ['running'], queryFn: api.running, refetchInterval: 3000 });
+const runningMap = computed(() => new Map((runningQuery.data.value ?? []).map((r) => [r.sessionId, r.status])));
+function runLabel(s?: string): string {
+  return s === 'busy' ? '忙' : s === 'idle' ? '闲' : s || '运行中';
+}
+
+const msg = useMessage();
+function copyResume(cwd: string, sid: string): void {
+  if (runningMap.has(sid) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
+  navigator.clipboard
+    .writeText(`cd "${cwd}" && claude --resume ${sid}`)
+    .then(() => msg.success('已复制：cd 到目录并 resume'))
+    .catch(() => msg.error('复制失败'));
+}
 
 async function loadSessions(dir: string): Promise<void> {
   if (!sessionsCache.value[dir]) sessionsCache.value[dir] = await api.sessions(dir);
@@ -179,6 +195,7 @@ function appendStreamEvent(ev: SSEEvent): void {
 
 async function sendPrompt(): Promise<void> {
   if (!store.dirName || !store.sessionId) return;
+  if (runningMap.has(store.sessionId) && !confirm('该 session 正在另一个终端运行，继续可能导致分叉。仍要继续吗？')) return;
   const prompt = promptInput.value.trim();
   if (!prompt) return;
   if (!confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
@@ -466,7 +483,11 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 :class="{ active: store.sessionId === s.sessionId }"
                 @click.stop="selectSession(node.p.dirName, s)"
               >
-                <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
+                <div class="sess-head">
+                  <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
+                  <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)">📋</button>
+                </div>
+                <div v-if="runningMap.has(s.sessionId)" class="run-badge" :class="runningMap.get(s.sessionId)"><span class="run-dot"></span>{{ runLabel(runningMap.get(s.sessionId)) }}</div>
                 <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>
               </div>
             </div>

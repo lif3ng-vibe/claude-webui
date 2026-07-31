@@ -24,6 +24,15 @@ export interface SessionEntry {
   preview: string;
 }
 
+/** 运行中的 Claude Code 会话状态（来自 ~/.claude/sessions/<pid>.json）。 */
+export interface RunningSessionInfo {
+  sessionId: string;
+  cwd: string;
+  status: string; // "busy" | "idle" | ...
+  name?: string;
+  updatedAt?: number;
+}
+
 /** session jsonl 的一行。结构宽松，Claude Code 会写多种 `type`。 */
 export interface SessionMessage {
   type: string;
@@ -51,6 +60,28 @@ export class ClaudeFileReader {
   /** 该 reader 读取的 ~/.claude 根目录（供只读工具作用域使用）。 */
   claudeHome(): string {
     return this.claudeDir;
+  }
+
+  /** 当前正在运行的 Claude Code 会话（来自 ~/.claude/sessions/<pid>.json，进程退出后文件被清）。 */
+  async getRunningSessions(): Promise<RunningSessionInfo[]> {
+    const dir = join(this.claudeDir, 'sessions');
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch {
+      return [];
+    }
+    const out: RunningSessionInfo[] = [];
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const raw = JSON.parse(await readFile(join(dir, f), 'utf8'));
+        if (raw.sessionId) out.push({ sessionId: raw.sessionId, cwd: raw.cwd || '', status: raw.status || '', name: raw.name, updatedAt: raw.updatedAt });
+      } catch {
+        /* 跳过无法解析的文件 */
+      }
+    }
+    return out;
   }
 
   projectsDir(): string {

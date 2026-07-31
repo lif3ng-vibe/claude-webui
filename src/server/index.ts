@@ -314,6 +314,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
     // —— session 浏览 / 续接 ——
     if (path === '/api/projects' && req.method === 'GET') return json(res, 200, await reader.listProjects());
+    if (path === '/api/running' && req.method === 'GET') return json(res, 200, await reader.getRunningSessions());
 
     let m: RegExpMatchArray | null;
     if ((m = path.match(/^\/api\/projects\/([^/]+)\/sessions$/)) && req.method === 'GET') {
