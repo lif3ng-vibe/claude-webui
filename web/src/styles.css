@@ -105,3 +105,7 @@ details > pre { margin: 4px 0 4px 14px; }
 .conv-item.active { background: #2d3a5a; }
 .conv-title { font-size: 12px; color: #ddd; }
 .conv-meta { font-size: 11px; color: #666; }
+.conv-kind { font-size: 10px; color: #b388ff; margin-left: 6px; }
+.conv-del { position: absolute; right: 6px; top: 6px; background: none; border: none; color: #666; cursor: pointer; padding: 2px; }
+.conv-del:hover { color: #e88; }
+.conv-item { position: relative; }

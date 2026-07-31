@@ -7,7 +7,7 @@ import { ClaudeRunner } from '../claude/Runner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
 import { resolveProvider, publicConfig, saveProviders } from '../config.js';
-import { conversations, type Conversation } from '../conversations.js';
+import { conversations, type Conversation, type ConvMessage } from '../conversations.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 
@@ -210,6 +210,15 @@ async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<v
 
   const executor = createFsToolExecutor([cwd, reader.claudeHome()]);
   const provider = new AnthropicProvider(cfg);
+  const studyConvId = crypto.randomUUID();
+  const now = Date.now();
+  let studyMessages: unknown[] = [];
+
+  const ac = new AbortController();
+  res.writeHead(200, SSE_HEADERS);
+  const write = sseWriter(res, req);
+  req.on('close', () => ac.abort());
+  write(`event: conversation\ndata: ${JSON.stringify({ id: studyConvId })}\n\n`);
   const steps = Array.isArray(body.steps) ? body.steps : body.step != null ? [body.step] : [];
   const stepText = steps
     .map((s: unknown, i: number) => `--- 步骤 ${i + 1} ---\n${JSON.stringify(s)}`)
@@ -220,11 +229,6 @@ async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<v
     `问题：${question}\n\n` +
     `你可以使用 read_file / list_files / grep（根目录为该工作目录，也可读 ~/.claude）查阅真实文件后再回答。`;
 
-  const ac = new AbortController();
-  res.writeHead(200, SSE_HEADERS);
-  const write = sseWriter(res, req);
-  req.on('close', () => ac.abort());
-
   try {
     for await (const d of provider.stream({
       model: body.model || cfg.defaultModel,
@@ -233,20 +237,36 @@ async function handleStudy(req: IncomingMessage, res: ServerResponse): Promise<v
       tools: FS_TOOLS,
       executeTool: executor,
     })) {
+      if (d.type === 'messages') studyMessages = d.messages as unknown[];
       const payload =
         d.type === 'request'
           ? { request: d.request }
-          : d.type === 'text' || d.type === 'thinking'
-            ? { text: d.text }
-            : d.type === 'tool_use'
-              ? { toolCall: d.toolCall }
-              : d.type === 'tool_result'
-                ? { id: d.id, name: d.name, result: d.result }
-                : d.type === 'error'
-                  ? { error: d.error }
-                  : {};
+          : d.type === 'messages'
+            ? { messages: d.messages }
+            : d.type === 'text' || d.type === 'thinking'
+              ? { text: d.text }
+              : d.type === 'tool_use'
+                ? { toolCall: d.toolCall }
+                : d.type === 'tool_result'
+                  ? { id: d.id, name: d.name, result: d.result }
+                  : d.type === 'error'
+                    ? { error: d.error }
+                    : {};
       write(`event: ${d.type}\n`);
       write(`data: ${JSON.stringify(payload)}\n\n`);
+    }
+    if (studyMessages.length) {
+      await conversations.save({
+        id: studyConvId,
+        kind: 'study',
+        title: question.slice(0, 40) || '深问',
+        systemPrompt: STUDY_PROMPT,
+        cwd,
+        studySessionId: dirName,
+        messages: studyMessages as ConvMessage[],
+        createdAt: now,
+        updatedAt: Date.now(),
+      });
     }
   } catch (e) {
     write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);

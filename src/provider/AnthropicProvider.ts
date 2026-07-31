@@ -102,6 +102,7 @@ export class AnthropicProvider implements Provider {
         messages = [...messages, { role: 'user', content: results }];
       }
       yield { type: 'done' }; // 达到最大轮数
+      yield { type: 'messages', messages: JSON.parse(JSON.stringify(messages)) as unknown[] };
     } catch (e) {
       yield { type: 'error', error: String((e as { message?: unknown })?.message ?? e) };
     }

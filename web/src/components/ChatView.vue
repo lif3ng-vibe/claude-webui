@@ -2,8 +2,8 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useQuery } from '@tanstack/vue-query';
 import { NSelect, useMessage } from 'naive-ui';
-import { api, saveConversation, type ConversationSummary } from '../api';
-import { renderMd } from '../lib/render';
+import { api, saveConversation, deleteConversation, type ConversationSummary } from '../api';
+import { renderContent } from '../lib/render';
 import { readSSE } from '../lib/sse';
 import { useConfig } from '../composables/useConfig';
 
@@ -46,7 +46,7 @@ let chatId = 0;
 
 const msg = useMessage();
 const conversationsQuery = useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
-const conversations = computed(() => (conversationsQuery.data.value ?? []).filter((c) => c.kind === 'chat'));
+const conversations = computed(() => conversationsQuery.data.value ?? []);
 const conversationId = ref<string>('');
 
 async function saveCurrent(): Promise<void> {
@@ -67,7 +67,7 @@ async function loadConv(s: ConversationSummary): Promise<void> {
     content: m.role === 'user' ? String(m.content ?? '') : '',
     bodyText: m.role === 'assistant' ? String(m.content ?? '') : '',
     thinking: '',
-    bodyHtml: m.role === 'assistant' ? renderMd(m.content) : '',
+    bodyHtml: m.role === 'assistant' ? renderContent(m.content) : '',
     requests: [],
   }));
   conversationId.value = c.id;
@@ -79,6 +79,12 @@ async function loadConv(s: ConversationSummary): Promise<void> {
 function newChat(): void {
   chatMsgs.value = [];
   conversationId.value = '';
+}
+
+const showHistory = ref(true);
+async function delConv(c: ConversationSummary): Promise<void> {
+  await deleteConversation(c.id);
+  await conversationsQuery.refetch();
 }
 
 watch(
@@ -123,11 +129,11 @@ async function sendChat(): Promise<void> {
       else if (ev.event === 'error') a.bodyText += `\n[error] ${ev.data?.error ?? ''}`;
       chatScrollTick.value++;
     });
-    if (a.bodyText) a.bodyHtml = renderMd(a.bodyText);
+    if (a.bodyText) a.bodyHtml = renderContent(a.bodyText);
     void saveCurrent();
   } catch (e) {
     if ((e as Error).name !== 'AbortError') a.bodyText += `\n[error] ${String(e)}`;
-    if (a.bodyText) a.bodyHtml = renderMd(a.bodyText);
+    if (a.bodyText) a.bodyHtml = renderContent(a.bodyText);
     void saveCurrent();
   } finally {
     sending.value = false;
@@ -154,13 +160,14 @@ async function sendChat(): Promise<void> {
       <textarea v-model="systemPrompt" class="sys-prompt" placeholder="选择上方预设或自行编辑系统提示词…"></textarea>
       <div class="preset-hint">预置提示词存于 ~/.claude-webui/prompts.json</div>
       <div class="conv-head">
-        <span class="text-[12px] text-[#888]">对话历史</span>
+        <span class="text-[12px] text-[#888] cursor-pointer" @click="showHistory = !showHistory">{{ showHistory ? '▾' : '▸' }} 对话历史</span>
         <button class="ask" @click="newChat">+ 新对话</button>
       </div>
-      <div class="conv-list">
+      <div v-show="showHistory" class="conv-list">
         <div v-for="c in conversations" :key="c.id" class="conv-item" :class="{ active: c.id === conversationId }" @click="loadConv(c)">
-          <div class="conv-title">{{ c.title }}</div>
+          <div class="conv-title">{{ c.title }}<span class="conv-kind">{{ c.kind === 'study' ? '深问' : '聊天' }}</span></div>
           <div class="conv-meta">{{ new Date(c.updatedAt).toLocaleString() }}</div>
+          <button class="conv-del" @click.stop="delConv(c)">🗑</button>
         </div>
       </div>
     </aside>
