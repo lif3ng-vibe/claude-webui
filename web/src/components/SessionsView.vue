@@ -35,7 +35,7 @@ function runLabel(s?: string): string {
 
 const msg = useMessage();
 function copyResume(cwd: string, sid: string): void {
-  if (runningMap.has(sid) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
+  if (runningMap.value.has(sid) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
   navigator.clipboard
     .writeText(`cd "${cwd}" && claude --resume ${sid}`)
     .then(() => msg.success('已复制：cd 到目录并 resume'))
@@ -195,7 +195,7 @@ function appendStreamEvent(ev: SSEEvent): void {
 
 async function sendPrompt(): Promise<void> {
   if (!store.dirName || !store.sessionId) return;
-  if (runningMap.has(store.sessionId) && !confirm('该 session 正在另一个终端运行，继续可能导致分叉。仍要继续吗？')) return;
+  if (runningMap.value.has(store.sessionId) && !confirm('该 session 正在另一个终端运行，继续可能导致分叉。仍要继续吗？')) return;
   const prompt = promptInput.value.trim();
   if (!prompt) return;
   if (!confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
