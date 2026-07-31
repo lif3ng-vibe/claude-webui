@@ -37,12 +37,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS 未签名：不设 CSC_LINK/CSC_KEY_PASSWORD，产出未签名 universal dmg。
-      - uses: actions/upload-artifact@v4
+      - name: 列出产物（诊断）
+        if: always()
+        shell: bash
+        run: find release -type f 2>/dev/null || true
+      - name: upload (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
         with:
-          name: electron-${{ matrix.os }}
+          name: electron-windows
+          path: release/*.exe
+          if-no-files-found: true
+      - name: upload (mac)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-mac
           path: |
             release/*.dmg
-            release/*.exe
             release/*-mac.zip
           if-no-files-found: true
 
@@ -68,17 +80,29 @@ jobs:
       - run: npm --prefix web ci
       - name: tauri build（mac universal，未签名）
         if: runner.os == 'macOS'
-        run: npx tauri build --target universal-apple-darwin
+        run: npx tauri build --target universal-apple-darwin --verbose
       - name: tauri build（windows，未签名）
         if: runner.os == 'Windows'
-        run: npx tauri build
-      - uses: actions/upload-artifact@v4
+        run: npx tauri build --verbose
+      - name: 列出产物（诊断）
+        if: always()
+        shell: bash
+        run: find src-tauri/target -path '*bundle*' -type f 2>/dev/null || true
+      - name: upload (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
         with:
-          name: tauri-${{ matrix.os }}
+          name: tauri-windows
           path: |
-            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: true
+      - name: upload (mac)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-mac
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: true
 
   release:

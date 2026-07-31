@@ -9,5 +9,6 @@
     "noEmit": false,
     "types": ["node"]
   },
-  "include": ["."]
+  "include": ["."],
+  "exclude": []
 }
