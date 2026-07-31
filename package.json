@@ -3,17 +3,54 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "dist-electron/main.js",
   "description": "Local web UI for viewing/continuing Claude Code sessions and chatting with Anthropic.",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/server/index.ts",
     "build:web": "npm --prefix web run build",
+    "build:server": "node scripts/build-server.mjs",
     "typecheck": "tsc -p tsconfig.test.json",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "build:electron": "node scripts/build-electron.mjs",
+    "dist:electron": "node scripts/dist-electron.mjs",
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build"
+  },
+  "build": {
+    "appId": "app.claude-webui",
+    "productName": "claude-webui",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**",
+      "dist-server/**",
+      "web/dist/**",
+      "node_modules/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["universal"] }],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.0.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"

@@ -1,7 +1,13 @@
 node_modules/
 dist/
+dist-server/
+dist-electron/
+release/
 *.log
 .DS_Store
+
+# 本地 cargo 镜像配置（国内构建加速），CI 不需要
+.cargo/
 
 # Locally-installed agent skills (generated via `npx skills`), not app code
 .agents/

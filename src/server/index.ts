@@ -20,9 +20,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const reader = new ClaudeFileReader();
 const runner = new ClaudeRunner();
 const prompts = new PromptsStore();
-const PORT = Number(process.env.PORT) || 3000;
-const WEB_DIR = join(__dirname, '..', '..', 'web');
-const DIST_DIR = join(WEB_DIR, 'dist');
+// 注意 `Number(process.env.PORT) || 3000` 会把 PORT=0 当成 falsy 回退 3000，桌面壳握手靠 PORT=0 绑随机端口，故显式区分"未设"与"=0"。
+const rawPort = process.env.PORT;
+const PORT = rawPort === undefined || rawPort === ''
+  ? 3000
+  : Number.isFinite(Number(rawPort)) ? Number(rawPort) : 3000;
+// 静态资源路径需 env 可覆盖：打包成单文件 sidecar 后 import.meta.url 指向 bundle 目录（<root>/dist-server），
+// 与源码（<root>/src/server）层级不同，故按 CLAUDE_WEBUI_BUNDLE 区分回退深度；显式 env 优先。
+const WEB_DIR = process.env.CLAUDE_WEBUI_WEB_DIR
+  || (process.env.CLAUDE_WEBUI_BUNDLE ? join(__dirname, '..', 'web') : join(__dirname, '..', '..', 'web'));
+const DIST_DIR = process.env.CLAUDE_WEBUI_DIST_DIR || join(WEB_DIR, 'dist');
+
+// 结构化日志：写 stderr（stdout 留给握手行，shell 干净解析）。
+function log(level: 'log' | 'error' | 'info', msg: string, fields?: Record<string, unknown>): void {
+  const line = JSON.stringify({ ts: Date.now(), level, msg, ...fields });
+  process.stderr.write(line + '\n');
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -405,5 +418,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 });
 
 server.listen(PORT, () => {
-  console.log(`claude-webui 开发服务: http://localhost:${PORT}`);
+  // 绑 port 0 时 OS 分配随机端口，必须用实际端口而非请求端口，否则 shell 握手拿不到。
+  const addr = server.address();
+  const actualPort = typeof addr === 'object' && addr ? addr.port : PORT;
+  // 桌面壳握手：首行 stdout 回传实际端口，shell 据此把窗口指向 http://localhost:<port>/。
+  if (process.env.CLAUDE_WEBUI_HANDSHAKE === '1') {
+    process.stdout.write(`CLAUDE_WEBUI_PORT=${actualPort}\n`);
+    log('info', 'sidecar started', { port: actualPort });
+  } else {
+    console.log(`claude-webui 开发服务: http://localhost:${actualPort}`);
+  }
 });
