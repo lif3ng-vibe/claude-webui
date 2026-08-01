@@ -4,7 +4,7 @@ import { SessionRunner } from '../claude/SessionRunner.js';
 import { handleCommand } from './commands.js';
 import { createAccumulator, toCard, Throttle } from './formatter.js';
 import { SessionState } from './SessionState.js';
-import type { FeishuConfig } from './feishuConfig.js';
+import type { FeishuApp } from './feishuConfig.js';
 import type { FeishuSender } from './types.js';
 
 /** 已解析的飞书消息事件（由 server 把 lark 原始事件转成这个）。 */
@@ -19,7 +19,7 @@ export interface BotDeps {
   reader: ClaudeFileReader;
   sessionRunner: SessionRunner;
   state: SessionState;
-  config: FeishuConfig;
+  config: FeishuApp;
   sender: FeishuSender;
   busySessionIds: () => Set<string>;
   /** 白名单为空时，首个发消息者被认作创建人；此回调持久化其 open_id。 */
@@ -57,6 +57,12 @@ export class FeishuBot {
   }
 
   async start(): Promise<void> {
+    // 绑定 session 初始化当前 session（解析权威 cwd）；未绑定则留空，靠命令 /use 切换。
+    const b = this.deps.config.boundSession;
+    if (b && !this.deps.state.current()) {
+      const cwd = await this.deps.reader.getSessionCwd(b.dirName, b.sessionId).catch(() => undefined);
+      if (cwd) this.deps.state.set({ sessionId: b.sessionId, dirName: b.dirName, cwd });
+    }
     await this.deps.startListener((ev) => {
       void this.handleMessage(ev);
     });

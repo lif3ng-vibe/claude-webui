@@ -16,7 +16,7 @@ import { createTerminalHandler } from '../terminal/TerminalManager.js';
 import { FeishuBot } from '../feishu/Bot.js';
 import { SessionState } from '../feishu/SessionState.js';
 import { Notifier } from '../feishu/Notifier.js';
-import { loadFeishu, publicFeishu, saveFeishu } from '../feishu/feishuConfig.js';
+import { loadFeishuApps, publicFeishuApps, saveFeishuApps } from '../feishu/feishuConfig.js';
 import { newLarkClient, createFeishuSender, createFeishuListener } from '../feishu/larkAdapter.js';
 
 const STUDY_PROMPT =
@@ -90,71 +90,91 @@ const runningSessions = new Set<string>();
 /** 共享锁驱动器：web 续接、飞书续接、本地通知都经此（见 src/claude/SessionRunner.ts）。 */
 const sessionRunner = new SessionRunner(runner, runningSessions);
 
-// —— 飞书机器人 ——
-const feishuState = new SessionState();
-let feishuBot: FeishuBot | null = null;
-let feishuNotifier: Notifier | null = null;
-let feishuListener: { start: () => Promise<void>; stop: () => Promise<void> } | null = null;
+// —— 飞书机器人（多应用，每个 app 一个 Bot 绑定一个 session）——
+interface FeishuRuntime {
+  bot: FeishuBot;
+  notifier: Notifier;
+  state: SessionState;
+}
+const feishuRuntimes = new Map<string, FeishuRuntime>(); // 按 app.id
+const feishuListeners = new Map<string, { start: () => Promise<void>; stop: () => Promise<void> }>();
 
-// 本地任务完成/出错 → 推飞书提醒（飞书发起的不重复推；busy/aborted 不推）。
+// 本地任务完成/出错 → 推所有 enableNotify 的飞书应用（飞书发起的不重复推；busy/aborted 不推）。
 sessionRunner.onFinished = (info, source, req) => {
   if (source === 'feishu' || info.busy || info.aborted) return;
   void (async () => {
-    const cfg = await loadFeishu();
-    if (!cfg?.enableNotify || !feishuNotifier) return;
+    const apps = await loadFeishuApps();
     const flag = info.ok ? '✅' : '❌';
-    await feishuNotifier
-      .notify({ text: `${flag} session ${req.sessionId.slice(0, 8)} ${info.ok ? '完成' : '失败'} · 📂 ${req.cwd}` })
-      .catch(() => {});
+    const text = `${flag} session ${req.sessionId.slice(0, 8)} ${info.ok ? '完成' : '失败'} · 📂 ${req.cwd}`;
+    await Promise.all(apps.filter((a) => a.enableNotify).map((a) => feishuRuntimes.get(a.id)?.notifier.notify({ text }).catch(() => {})));
   })();
 };
 
-/** 按 config 启动飞书 bot（已配置才起；已起则跳过）。 */
-async function startFeishuBot(): Promise<void> {
-  const cfg = await loadFeishu();
-  if (!cfg) {
-    log('info', 'feishu: 未配置，跳过');
-    return;
-  }
-  if (feishuBot) return;
-  const client = newLarkClient(cfg);
-  const sender = createFeishuSender(client);
-  feishuNotifier = new Notifier(sender, { chatIdForNotify: cfg.chatIdForNotify, fallbackOpenId: cfg.allowedUserIds[0] });
-  feishuBot = new FeishuBot({
-    reader,
-    sessionRunner,
-    state: feishuState,
-    config: cfg,
-    sender,
-    busySessionIds: () => new Set(runningSessions),
-    onFirstUser: async (openId) => {
-      const cur = await loadFeishu();
-      if (cur && cur.allowedUserIds.length === 0) {
-        await saveFeishu({ allowedUserIds: [openId] });
-        log('info', 'feishu: 已认主', { openId });
-      }
-    },
-    startListener: async (handler) => {
-      feishuListener = createFeishuListener(cfg, handler);
-      await feishuListener.start();
-    },
-    stopListener: async () => {
-      await feishuListener?.stop().catch(() => {});
-      feishuListener = null;
-    },
-  });
-  await feishuBot.start();
-  log('info', 'feishu: bot 已启动', { domain: cfg.domain });
+/** 所有已配置应用的状态（供前端徽标）。 */
+async function feishuStatusAll(): Promise<Array<{ id: string; name?: string; appId: string; state: string }>> {
+  const apps = await publicFeishuApps();
+  return apps.map((a) => ({ id: a.id, name: a.name, appId: a.appId, state: feishuRuntimes.get(a.id)?.bot.status() ?? 'offline' }));
 }
 
-/** 配置变更后重启 bot：先停旧实例，再按新配置启动。 */
-async function restartFeishuBot(): Promise<void> {
-  if (feishuBot) {
-    await feishuBot.stop().catch(() => {});
-    feishuBot = null;
+/** 按 config 启动所有飞书应用（已起的跳过；单个失败不阻断其它）。 */
+async function startAllFeishuApps(): Promise<void> {
+  const apps = await loadFeishuApps();
+  if (!apps.length) {
+    log('info', 'feishu: 未配置应用，跳过');
+    return;
   }
-  feishuNotifier = null;
-  await startFeishuBot();
+  for (const cfg of apps) {
+    if (feishuRuntimes.has(cfg.id)) continue;
+    try {
+      const client = newLarkClient(cfg);
+      const sender = createFeishuSender(client);
+      const state = new SessionState();
+      const notifier = new Notifier(sender, { chatIdForNotify: cfg.chatIdForNotify, fallbackOpenId: cfg.allowedUserIds[0] });
+      const bot = new FeishuBot({
+        reader,
+        sessionRunner,
+        state,
+        config: cfg,
+        sender,
+        busySessionIds: () => new Set(runningSessions),
+        onFirstUser: async (openId) => {
+          const cur = await loadFeishuApps();
+          const me = cur.find((a) => a.id === cfg.id);
+          if (me && me.allowedUserIds.length === 0) {
+            await saveFeishuApps(cur.map((a) => (a.id === cfg.id ? { ...a, allowedUserIds: [openId] } : a)));
+            log('info', 'feishu: 已认主', { app: cfg.id, openId });
+          }
+        },
+        startListener: async (handler) => {
+          const listener = createFeishuListener(cfg, handler);
+          feishuListeners.set(cfg.id, listener);
+          await listener.start();
+        },
+        stopListener: async () => {
+          await feishuListeners.get(cfg.id)?.stop().catch(() => {});
+          feishuListeners.delete(cfg.id);
+        },
+      });
+      feishuRuntimes.set(cfg.id, { bot, notifier, state });
+      await bot.start();
+      log('info', 'feishu: app 已启动', { app: cfg.id, domain: cfg.domain });
+    } catch (e) {
+      log('error', 'feishu: app 启动失败', { app: cfg.id, error: String(e) });
+    }
+  }
+}
+
+/** 停所有飞书应用。 */
+async function stopAllFeishuApps(): Promise<void> {
+  for (const [, rt] of feishuRuntimes) await rt.bot.stop().catch(() => {});
+  feishuRuntimes.clear();
+  feishuListeners.clear();
+}
+
+/** 配置变更后重启所有飞书应用。 */
+async function restartAllFeishuApps(): Promise<void> {
+  await stopAllFeishuApps();
+  await startAllFeishuApps();
 }
 
 function json(res: ServerResponse, code: number, body: unknown): void {
@@ -403,30 +423,28 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
     // —— 配置 ——
     if (path === '/api/config' && req.method === 'GET') {
-      return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishu() });
+      return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishuApps() });
     }
     if (path === '/api/config' && req.method === 'PUT') {
       const b = await readBody(req);
       const providers = Array.isArray(b.providers) ? b.providers : [];
       await saveProviders(providers, String(b.activeProviderId ?? ''));
-      if (b.feishu && typeof b.feishu === 'object') await saveFeishu(b.feishu);
-      return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishu() });
+      return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishuApps() });
     }
 
     // —— 飞书机器人 ——
     if (path === '/api/feishu/status' && req.method === 'GET') {
-      const cfg = await loadFeishu();
-      return json(res, 200, { state: !cfg ? 'unconfigured' : feishuBot?.status() ?? 'offline' });
+      return json(res, 200, { apps: await feishuStatusAll() });
     }
     if (path === '/api/feishu/restart' && req.method === 'POST') {
-      await restartFeishuBot();
-      const cfg = await loadFeishu();
-      return json(res, 200, { state: !cfg ? 'unconfigured' : feishuBot?.status() ?? 'offline' });
+      await restartAllFeishuApps();
+      return json(res, 200, { apps: await feishuStatusAll() });
     }
     if (path === '/api/feishu/config' && req.method === 'PUT') {
       const b = await readBody(req);
-      await saveFeishu(b);
-      return json(res, 200, await publicFeishu());
+      await saveFeishuApps(Array.isArray(b.apps) ? b.apps : []);
+      await restartAllFeishuApps();
+      return json(res, 200, await publicFeishuApps());
     }
 
     // —— 预置提示词 ——
@@ -544,5 +562,5 @@ server.listen(PORT, () => {
     console.log(`claude-webui 开发服务: http://localhost:${actualPort}`);
   }
   // 启动飞书机器人（未配置则跳过；失败不阻断 sidecar）。
-  void startFeishuBot().catch((e) => log('error', 'feishu 启动失败', { error: String(e) }));
+  void startAllFeishuApps().catch((e) => log('error', 'feishu 启动失败', { error: String(e) }));
 });

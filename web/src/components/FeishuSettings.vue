@@ -1,43 +1,98 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { NInput, NButton, NSelect, NSwitch, NCard, useMessage } from 'naive-ui';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { useIntervalFn } from '@vueuse/core';
-import { api, saveFeishu, feishuStatus, feishuRestart, type ConfigResponse, type FeishuInput } from '../api';
+import { api, saveFeishuApps, feishuStatus, type ConfigResponse, type FeishuAppInput, type PublicFeishuApp } from '../api';
 
 const emit = defineEmits<{ close: [] }>();
 const queryClient = useQueryClient();
 const msg = useMessage();
 const configQuery = useQuery({ queryKey: ['config'], queryFn: api.config });
+const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.projects });
 
-const appId = ref('');
-const appSecret = ref('');
-const allowed = ref('');
-const domain = ref<'feishu' | 'lark'>('feishu');
-const enableNotify = ref(true);
-const chatIdForNotify = ref('');
-const hasSecret = ref(false);
+interface EditApp {
+  id: string;
+  name: string;
+  appId: string;
+  appSecret: string;
+  allowed: string;
+  domain: 'feishu' | 'lark';
+  enableNotify: boolean;
+  chatIdForNotify: string;
+  boundDir: string;
+  boundSid: string;
+  hasSecret: boolean;
+}
 
+function toEdit(p: PublicFeishuApp): EditApp {
+  return {
+    id: p.id,
+    name: p.name ?? '',
+    appId: p.appId,
+    appSecret: '',
+    allowed: p.allowedUserIds.join('\n'),
+    domain: p.domain,
+    enableNotify: p.enableNotify,
+    chatIdForNotify: p.chatIdForNotify ?? '',
+    boundDir: p.boundSession?.dirName ?? '',
+    boundSid: p.boundSession?.sessionId ?? '',
+    hasSecret: p.hasSecret,
+  };
+}
+
+const apps = ref<EditApp[]>([]);
 watch(
   configQuery.data,
   (c: ConfigResponse | undefined) => {
-    if (!c?.feishu) return;
-    appId.value = c.feishu.appId;
-    appSecret.value = '';
-    allowed.value = c.feishu.allowedUserIds.join('\n');
-    domain.value = c.feishu.domain;
-    enableNotify.value = c.feishu.enableNotify;
-    chatIdForNotify.value = c.feishu.chatIdForNotify ?? '';
-    hasSecret.value = c.feishu.hasSecret;
+    if (!c) return;
+    apps.value = (c.feishu ?? []).map(toEdit);
+    for (const a of apps.value) if (a.boundDir) void ensureSessions(a.boundDir);
   },
   { immediate: true },
 );
 
-// 在线状态轮询（3s）
-const state = ref<'online' | 'offline' | 'unconfigured'>('offline');
+function addApp(): void {
+  apps.value.push({
+    id: 'app_' + Date.now(),
+    name: '', appId: '', appSecret: '', allowed: '', domain: 'feishu',
+    enableNotify: true, chatIdForNotify: '', boundDir: '', boundSid: '', hasSecret: false,
+  });
+}
+function removeApp(id: string): void {
+  apps.value = apps.value.filter((a) => a.id !== id);
+}
+
+// 绑定 session 两级选择：目录 → session。
+const dirOptions = computed(() => (projectsQuery.data.value ?? []).map((p) => ({ label: p.cwd || p.dirName, value: p.dirName })));
+const sessionsCache = ref<Record<string, Array<{ sessionId: string; preview: string }>>>({});
+async function ensureSessions(dir: string): Promise<void> {
+  if (!dir || sessionsCache.value[dir]) return;
+  try {
+    const ss = await api.sessions(dir);
+    sessionsCache.value = { ...sessionsCache.value, [dir]: ss.map((s) => ({ sessionId: s.sessionId, preview: s.preview })) };
+  } catch {
+    /* 忽略 */
+  }
+}
+function sessionOptions(dir: string): Array<{ label: string; value: string }> {
+  return (sessionsCache.value[dir] ?? []).map((s) => ({
+    label: `${s.sessionId.slice(0, 8)} · ${s.preview.slice(0, 30)}`,
+    value: s.sessionId,
+  }));
+}
+async function onDirChange(app: EditApp, dir: string): Promise<void> {
+  app.boundDir = dir;
+  app.boundSid = '';
+  await ensureSessions(dir);
+}
+
+// per-app 在线状态轮询（3s）。
+const statuses = ref<Record<string, string>>({});
 async function refreshStatus(): Promise<void> {
   try {
-    state.value = (await feishuStatus()).state;
+    const r = await feishuStatus();
+    statuses.value = Object.fromEntries(r.apps.map((a) => [a.id, a.state]));
   } catch {
     /* 忽略 */
   }
@@ -50,17 +105,19 @@ const domainOptions = [
 ];
 
 async function save(): Promise<void> {
-  const input: FeishuInput = {
-    appId: appId.value.trim(),
-    appSecret: appSecret.value.trim(), // 留空保留旧值（后端处理）
-    allowedUserIds: allowed.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
-    domain: domain.value,
-    enableNotify: enableNotify.value,
-    chatIdForNotify: chatIdForNotify.value.trim() || undefined,
-  };
+  const input: FeishuAppInput[] = apps.value.map((a) => ({
+    id: a.id,
+    name: a.name || undefined,
+    appId: a.appId,
+    appSecret: a.appSecret,
+    allowedUserIds: a.allowed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+    domain: a.domain,
+    enableNotify: a.enableNotify,
+    chatIdForNotify: a.chatIdForNotify || undefined,
+    boundSession: a.boundDir && a.boundSid ? { dirName: a.boundDir, sessionId: a.boundSid } : null,
+  }));
   try {
-    await saveFeishu(input);
-    await feishuRestart(); // 配置变更后重启 bot
+    await saveFeishuApps(input);
     await queryClient.invalidateQueries({ queryKey: ['config'] });
     await refreshStatus();
     msg.success('已保存并重启机器人');
@@ -74,18 +131,27 @@ async function save(): Promise<void> {
 <template>
   <NCard title="飞书机器人" class="settings-card" :bordered="false">
     <div class="settings-body">
-      <div class="status-row">
-        <span class="state-dot" :class="state" />
-        <span class="state-text">{{ state === 'online' ? '在线' : state === 'unconfigured' ? '未配置' : '离线' }}</span>
-        <span v-if="hasSecret && !appSecret" class="hint">（appSecret 已设，留空保留）</span>
+      <p class="tip">每个机器人绑定一个 Claude session（发消息即续接它）。机器人名/头像在飞书平台各自应用里设，代码改不了。</p>
+
+      <div v-for="a in apps" :key="a.id" class="app-block">
+        <div class="app-head">
+          <span class="state-dot" :class="statuses[a.id] ?? 'offline'" />
+          <span class="app-name">{{ a.name || a.appId || '新机器人' }}</span>
+          <span class="state-text">{{ statuses[a.id] === 'online' ? '在线' : '离线' }}</span>
+          <button class="ask" @click="removeApp(a.id)">删除</button>
+        </div>
+        <div class="row"><span class="lbl">名称</span><NInput v-model:value="a.name" size="small" placeholder="备注，如「项目A」" /></div>
+        <div class="row"><span class="lbl">App ID</span><NInput v-model:value="a.appId" size="small" placeholder="cli_xxx" /></div>
+        <div class="row"><span class="lbl">App Secret</span><NInput v-model:value="a.appSecret" type="password" show-password-on="click" size="small" :placeholder="a.hasSecret ? '留空保留已设值' : 'secret'" /></div>
+        <div class="row"><span class="lbl">白名单</span><NInput v-model:value="a.allowed" type="textarea" :autosize="{ minRows: 1 }" size="small" placeholder="留空则首个发消息者自动成为创建人" /></div>
+        <div class="row"><span class="lbl">域名</span><NSelect v-model:value="a.domain" :options="domainOptions" size="small" class="flex-1" /></div>
+        <div class="row"><span class="lbl">绑定目录</span><NSelect :value="a.boundDir" :options="dirOptions" size="small" class="flex-1" placeholder="选择工作目录" @update:value="(v: string) => onDirChange(a, v)" /></div>
+        <div class="row"><span class="lbl">绑定 session</span><NSelect v-model:value="a.boundSid" :options="sessionOptions(a.boundDir)" size="small" class="flex-1" :placeholder="a.boundDir ? '选择 session' : '先选目录'" :disabled="!a.boundDir" /></div>
+        <div class="row"><span class="lbl">完成通知</span><NSwitch v-model:value="a.enableNotify" size="small" /></div>
+        <div class="row"><span class="lbl">通知群</span><NInput v-model:value="a.chatIdForNotify" size="small" placeholder="可选；留空发本人单聊" /></div>
       </div>
-      <div class="row"><span class="lbl">App ID</span><NInput v-model:value="appId" size="small" placeholder="cli_xxx" /></div>
-      <div class="row"><span class="lbl">App Secret</span><NInput v-model:value="appSecret" type="password" show-password-on="click" size="small" :placeholder="hasSecret ? '留空保留已设值' : '飞书应用 secret'" /></div>
-      <div class="row"><span class="lbl">白名单 open_id</span><NInput v-model:value="allowed" type="textarea" :autosize="{ minRows: 2 }" size="small" placeholder="留空则首个发消息者自动成为创建人；或每行一个 ou_xxx" /></div>
-      <div class="row"><span class="lbl">域名</span><NSelect v-model:value="domain" :options="domainOptions" size="small" class="flex-1" /></div>
-      <div class="row"><span class="lbl">完成通知</span><NSwitch v-model:value="enableNotify" size="small" /></div>
-      <div class="row"><span class="lbl">通知群 chat_id</span><NInput v-model:value="chatIdForNotify" size="small" placeholder="可选；留空发本人单聊" /></div>
-      <p class="tip">保存后机器人随本地服务常驻；触发需在飞书开放平台配「机器人 + 长连接事件 im.message.receive_v1 + im:message 权限」，并把你的 open_id 填入白名单。</p>
+
+      <NButton size="small" dashed @click="addApp">+ 添加机器人</NButton>
     </div>
 
     <template #footer>
@@ -98,14 +164,15 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
-.settings-card { width: 560px; max-width: 92vw; }
-.settings-body { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow: auto; }
+.settings-card { width: 600px; max-width: 94vw; }
+.settings-body { display: flex; flex-direction: column; gap: 8px; max-height: 64vh; overflow: auto; }
+.tip { font-size: 11px; color: #888; line-height: 1.5; margin: 0 0 4px; }
+.app-block { border: 1px solid #333; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.app-head { display: flex; align-items: center; gap: 6px; }
+.app-name { font-weight: 500; color: #ddd; flex: 1; }
 .row { display: flex; align-items: center; gap: 8px; }
-.lbl { width: 104px; font-size: 12px; color: #888; flex-shrink: 0; }
-.status-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; }
+.lbl { width: 84px; font-size: 12px; color: #888; flex-shrink: 0; }
 .state-dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
 .state-dot.online { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
-.state-dot.unconfigured { background: #f59e0b; }
-.hint { color: #666; }
-.tip { font-size: 11px; color: #777; line-height: 1.5; margin: 4px 0 0; }
+.state-text { font-size: 11px; color: #888; }
 </style>

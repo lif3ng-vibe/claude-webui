@@ -1,7 +1,7 @@
 // lark（飞书）SDK 适配层：把飞书 API 封装成项目内部的 FeishuSender + 长连接监听器。
 // 用 `as any` 规避 SDK 巨大的生成类型，保持本层薄；逻辑都在已测的 Bot/formatter/commands 里。
 import * as lark from '@larksuiteoapi/node-sdk';
-import type { FeishuConfig } from './feishuConfig.js';
+import type { FeishuApp } from './feishuConfig.js';
 import type { FeishuSender } from './types.js';
 import type { BotMessageEvent } from './Bot.js';
 
@@ -15,7 +15,7 @@ function domainOf(domain: 'feishu' | 'lark'): unknown {
 }
 
 /** 建 lark API client（发消息 / 更新消息用）。 */
-export function newLarkClient(cfg: FeishuConfig): AnyClient {
+export function newLarkClient(cfg: FeishuApp): AnyClient {
   const Client = (lark as AnyClient).Client;
   return new Client({ appId: cfg.appId, appSecret: cfg.appSecret, domain: domainOf(cfg.domain) });
 }
@@ -53,7 +53,7 @@ export function createFeishuSender(client: AnyClient): FeishuSender {
  * stop 关连接。handler 由 Bot.start 传入（即 Bot.handleMessage 的包装）。
  */
 export function createFeishuListener(
-  cfg: FeishuConfig,
+  cfg: FeishuApp,
   onMessage: (ev: BotMessageEvent) => void,
 ): { start: () => Promise<void>; stop: () => Promise<void> } {
   const eventDispatcher = new (lark as AnyClient).EventDispatcher({}).register({

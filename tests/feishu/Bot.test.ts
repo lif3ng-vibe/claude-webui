@@ -4,7 +4,7 @@ import { SessionRunner } from '../../src/claude/SessionRunner.js';
 import { SessionState } from '../../src/feishu/SessionState.js';
 import type { ClaudeRunEvent, ClaudeRunRequest } from '../../src/claude/Runner.js';
 import type { FeishuSender } from '../../src/feishu/types.js';
-import type { FeishuConfig } from '../../src/feishu/feishuConfig.js';
+import type { FeishuApp } from '../../src/feishu/feishuConfig.js';
 import type { ClaudeFileReader } from '../../src/claude/FileReader.js';
 
 function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unknown>> } {
@@ -24,7 +24,7 @@ function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unkno
   return { sender, calls };
 }
 
-function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[] } = {}) {
+function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string } } = {}) {
   const { sender, calls } = mockSender();
   const lock = opts.lock ?? new Set<string>();
   const events =
@@ -41,9 +41,9 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: strin
   const sessionRunner = new SessionRunner(fakeRunner, lock);
   const state = new SessionState(() => 1000);
   if (opts.current) state.set(opts.current);
-  const cfg: FeishuConfig = { appId: 'a', appSecret: 's', allowedUserIds: opts.allowed ? [...opts.allowed] : ['ou_me'], domain: 'feishu', enableNotify: true };
+  const cfg: FeishuApp = { id: 'a1', appId: 'a', appSecret: 's', allowedUserIds: opts.allowed ? [...opts.allowed] : ['ou_me'], domain: 'feishu', enableNotify: true, boundSession: opts.boundSession };
   const onFirstCalls: string[] = [];
-  const reader = { listProjects: async () => [], listSessions: async () => [] } as unknown as ClaudeFileReader;
+  const reader = { listProjects: async () => [], listSessions: async () => [], getSessionCwd: async () => '/p' } as unknown as ClaudeFileReader;
   const bot = new FeishuBot({
     reader,
     sessionRunner,
@@ -131,5 +131,11 @@ describe('FeishuBot handleMessage', () => {
     const { bot, calls } = makeBot();
     await bot.start();
     expect(calls.some((c) => c.m === 'sendText' && c.id === 'ou_me' && String(c.text).includes('已上线'))).toBe(true);
+  });
+
+  it('boundSession 启动时初始化 currentSession', async () => {
+    const { bot, state } = makeBot({ boundSession: { dirName: 'd1', sessionId: 'abc-123' } });
+    await bot.start();
+    expect(state.current()).toEqual({ sessionId: 'abc-123', dirName: 'd1', cwd: '/p' });
   });
 });
