@@ -23,6 +23,8 @@ export interface AppConfig {
   providers?: ProviderConfig[];
   activeProviderId?: string;
   maxTokens?: number;
+  /** 飞书机器人配置（结构见 src/feishu/feishuConfig.ts）。 */
+  feishu?: Record<string, unknown>;
   // 旧字段（兼容/兜底）
   anthropicApiKey?: string;
   anthropicAuthToken?: string;

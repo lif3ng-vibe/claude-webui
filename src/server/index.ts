@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, isAbsolute } from 'node:path';
 import { ClaudeFileReader } from '../claude/FileReader.js';
 import { ClaudeRunner } from '../claude/Runner.js';
+import { SessionRunner } from '../claude/SessionRunner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
 import { resolveProvider, publicConfig, saveProviders } from '../config.js';
@@ -81,6 +82,8 @@ async function serveDistFile(urlPath: string, res: ServerResponse): Promise<bool
 
 /** 正在运行的 session（按 sessionId 加锁，防止并发写同一 session 导致分叉）。 */
 const runningSessions = new Set<string>();
+/** 共享锁驱动器：web 续接、飞书续接、本地通知都经此（见 src/claude/SessionRunner.ts）。 */
+const sessionRunner = new SessionRunner(runner, runningSessions);
 
 function json(res: ServerResponse, code: number, body: unknown): void {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
@@ -130,28 +133,31 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, dirName: str
     return;
   }
 
-  runningSessions.add(sessionId);
   const ac = new AbortController();
   req.on('close', () => ac.abort());
   res.writeHead(200, SSE_HEADERS);
   const write = sseWriter(res, req);
 
-  try {
-    for await (const ev of runner.run({ sessionId, cwd, prompt, model: body.model, signal: ac.signal })) {
-      const payload = ev.type === 'stream-json' ? ev.data : ev.type === 'stderr' ? { text: ev.text } : { code: ev.code };
-      write(`event: ${ev.type}\n`);
-      write(`data: ${JSON.stringify(payload)}\n\n`);
-    }
+  const result = await sessionRunner.runLocked(
+    { sessionId, cwd, prompt, model: body.model, signal: ac.signal },
+    {
+      source: 'web',
+      onEvent: (ev) => {
+        const payload = ev.type === 'stream-json' ? ev.data : ev.type === 'stderr' ? { text: ev.text } : { code: ev.code };
+        write(`event: ${ev.type}\n`);
+        write(`data: ${JSON.stringify(payload)}\n\n`);
+      },
+    },
+  );
+  if (result.ok) {
     write('event: done\ndata: {}\n\n');
-  } catch (e) {
-    write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);
-  } finally {
-    runningSessions.delete(sessionId);
-    try {
-      if (!res.writableEnded) res.end();
-    } catch {
-      /* 忽略 */
-    }
+  } else if (!result.aborted && !result.busy) {
+    write(`event: error\ndata: ${JSON.stringify({ error: result.error ?? 'failed' })}\n\n`);
+  }
+  try {
+    if (!res.writableEnded) res.end();
+  } catch {
+    /* 忽略 */
   }
 }
 
