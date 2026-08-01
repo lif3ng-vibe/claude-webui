@@ -34,7 +34,9 @@
     ],
     "mac": {
       "target": [
-        { "target": "dmg" }
+        {
+          "target": "dmg"
+        }
       ],
       "category": "public.app-category.developer-tools"
     },
@@ -62,6 +64,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
+    "@larksuiteoapi/node-sdk": "^1.72.0",
     "node-pty": "^1.1.0",
     "ws": "^8.21.1"
   }
