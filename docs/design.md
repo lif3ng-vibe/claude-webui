@@ -216,3 +216,18 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。
 - **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，**预编译按平台且随 npm 包自带所有平台**（`prebuilds/{darwin-arm64,darwin-x64,win32-*}`），按需下载的 Node 22 直接兼容，无需匹配 Node ABI、无需跨 arch 抓取。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources`，sidecar prod env 设 `NODE_PATH=<resource_dir>[:<resource_dir>/node_modules]` 让 bundle 的 `require('node-pty')` 解析。
 - **风险/待办**：完整 dev/prod 终端在桌面安装包里跑通需实测（node-pty 预编译随包、Tauri `NODE_PATH` 解析）；CI 的 `macos-13`（Intel）runner 偶发排队拥堵——因 node-pty 预编译已自带 darwin-x64，可把 mac x64 改到 `macos-latest` 交叉编（Tauri `--target x86_64-apple-darwin` + `rustup target add`；Electron `--x64`）绕开，无需 Intel runner。
+
+## 12. 飞书机器人（远程续接 session + 完成通知）
+
+在飞书里用命令切换并续接 Claude Code session，结果以交互卡片增量流式回传；本地（web 单发续接）任务完成/出错也推飞书。设计稿 `docs/superpowers/specs/2026-08-02-feishu-bot-design.md`，实现计划 `docs/superpowers/plans/2026-08-02-feishu-bot.md`。
+
+- **定位**：一个飞书自建应用 + 全局单一当前 session + 命令切换；桌面端托盘保活、sidecar 内跑飞书长连接（`@larksuiteoapi/node-sdk` 的 `lark.ws.Client`，出站即可、无需公网）；仅白名单 user_id 可触发。
+- **后端模块**（`src/feishu/`）：`Bot.ts`（白名单+命令分流+流式续接卡片）、`commands.ts`（`/sessions` `/use` `/info` `/stop` `/help`）、`SessionState.ts`（全局 currentSession + 序号缓存 TTL）、`formatter.ts`（stream-json→飞书卡片 + `Throttle` 节流 + 超长折叠）、`Notifier.ts`（通知目标解析）、`feishuConfig.ts`（配置读写，secret 不回传）、`larkAdapter.ts`（封装飞书 SDK 为 `FeishuSender` + 长连接监听器，事件解析为 `BotMessageEvent`）。
+- **共享重构**：`src/claude/SessionRunner.ts` 把「锁→runner→lifecycle」抽成共享驱动器，web SSE、飞书卡片、本地通知都经此；`onFinished` 钩子供通知订阅（`source!=='feishu' && enableNotify && !aborted` 推送）。锁仍是同一个 `runningSessions` Set，web/终端/飞书三方互斥。
+- **端点**：`GET /api/config` 带 `publicFeishu`（不回 secret）；`PUT /api/feishu/config`（独立存飞书，不动 providers）；`GET /api/feishu/status`（online/offline/unconfigured）；`POST /api/feishu/restart`（配置变更后重启 bot，不重启整个 sidecar）。
+- **配置**（`~/.claude-webui/config.json` 的 `feishu` 段）：`appId/appSecret/allowedUserIds/domain(feishu|lark)/enableNotify/chatIdForNotify/timeoutMs`。secret 留空保留旧值（同 provider 逻辑）。
+- **回传**：续接结果 create 一张交互卡片 → stream-json 累加（按 message uuid 去重取最新 content）→ 节流 `im.message.patch`（~1.2s）→ 收尾定稿；正文超长折叠；工具调用/结果用 markdown 代码块。
+- **前端**：`FeishuSettings.vue`（appId/secret/白名单/domain/通知开关/chat_id 表单 + 在线状态 3s 轮询徽标），挂在设置弹窗（与 `ProviderSettings` 并列）。
+- **打包**：`@larksuiteoapi/node-sdk`（纯 JS，含 axios/protobufjs/lodash/qs）esbuild 打进 `dist-server/server.js`（~6.3MB）。
+- **交付边界**：真实飞书联调需用户在飞书开放平台建应用、配「机器人 + 长连接事件 `im.message.receive_v1` + `im:message` 权限」、填 appId/secret/白名单 open_id（见 spec §13）。代码做到配置后即用 + 单测 mock 覆盖（78 测试）。
+- **风险/待办**：飞书卡片 markdown 与标准差异（表格/嵌套列表降级为纯文本）；`patch` 频率限制节流参数需实测调；Windows `shell:true` 下 `/stop` 可能延迟；dev/prod 在桌面安装包里 bot 随 sidecar 常驻需实测。
