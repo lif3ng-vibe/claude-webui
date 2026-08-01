@@ -13,6 +13,11 @@ import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createTerminalHandler } from '../terminal/TerminalManager.js';
+import { FeishuBot } from '../feishu/Bot.js';
+import { SessionState } from '../feishu/SessionState.js';
+import { Notifier } from '../feishu/Notifier.js';
+import { loadFeishu, publicFeishu, saveFeishu } from '../feishu/feishuConfig.js';
+import { newLarkClient, createFeishuSender, createFeishuListener } from '../feishu/larkAdapter.js';
 
 const STUDY_PROMPT =
   '你是一个资深工程师。用户会给你 Claude Code session 里的某一步记录和一个问题。' +
@@ -84,6 +89,66 @@ async function serveDistFile(urlPath: string, res: ServerResponse): Promise<bool
 const runningSessions = new Set<string>();
 /** 共享锁驱动器：web 续接、飞书续接、本地通知都经此（见 src/claude/SessionRunner.ts）。 */
 const sessionRunner = new SessionRunner(runner, runningSessions);
+
+// —— 飞书机器人 ——
+const feishuState = new SessionState();
+let feishuBot: FeishuBot | null = null;
+let feishuNotifier: Notifier | null = null;
+let feishuListener: { start: () => Promise<void>; stop: () => Promise<void> } | null = null;
+
+// 本地任务完成/出错 → 推飞书提醒（飞书发起的不重复推；busy/aborted 不推）。
+sessionRunner.onFinished = (info, source, req) => {
+  if (source === 'feishu' || info.busy || info.aborted) return;
+  void (async () => {
+    const cfg = await loadFeishu();
+    if (!cfg?.enableNotify || !feishuNotifier) return;
+    const flag = info.ok ? '✅' : '❌';
+    await feishuNotifier
+      .notify({ text: `${flag} session ${req.sessionId.slice(0, 8)} ${info.ok ? '完成' : '失败'} · 📂 ${req.cwd}` })
+      .catch(() => {});
+  })();
+};
+
+/** 按 config 启动飞书 bot（已配置才起；已起则跳过）。 */
+async function startFeishuBot(): Promise<void> {
+  const cfg = await loadFeishu();
+  if (!cfg) {
+    log('info', 'feishu: 未配置，跳过');
+    return;
+  }
+  if (feishuBot) return;
+  const client = newLarkClient(cfg);
+  const sender = createFeishuSender(client);
+  feishuNotifier = new Notifier(sender, { chatIdForNotify: cfg.chatIdForNotify, fallbackOpenId: cfg.allowedUserIds[0] });
+  feishuBot = new FeishuBot({
+    reader,
+    sessionRunner,
+    state: feishuState,
+    config: cfg,
+    sender,
+    busySessionIds: () => new Set(runningSessions),
+    startListener: async (handler) => {
+      feishuListener = createFeishuListener(cfg, handler);
+      await feishuListener.start();
+    },
+    stopListener: async () => {
+      await feishuListener?.stop().catch(() => {});
+      feishuListener = null;
+    },
+  });
+  await feishuBot.start();
+  log('info', 'feishu: bot 已启动', { domain: cfg.domain });
+}
+
+/** 配置变更后重启 bot：先停旧实例，再按新配置启动。 */
+async function restartFeishuBot(): Promise<void> {
+  if (feishuBot) {
+    await feishuBot.stop().catch(() => {});
+    feishuBot = null;
+  }
+  feishuNotifier = null;
+  await startFeishuBot();
+}
 
 function json(res: ServerResponse, code: number, body: unknown): void {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
@@ -330,12 +395,26 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     }
 
     // —— 配置 ——
-    if (path === '/api/config' && req.method === 'GET') return json(res, 200, await publicConfig());
+    if (path === '/api/config' && req.method === 'GET') {
+      return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishu() });
+    }
     if (path === '/api/config' && req.method === 'PUT') {
       const b = await readBody(req);
       const providers = Array.isArray(b.providers) ? b.providers : [];
       await saveProviders(providers, String(b.activeProviderId ?? ''));
-      return json(res, 200, await publicConfig());
+      if (b.feishu && typeof b.feishu === 'object') await saveFeishu(b.feishu);
+      return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishu() });
+    }
+
+    // —— 飞书机器人 ——
+    if (path === '/api/feishu/status' && req.method === 'GET') {
+      const cfg = await loadFeishu();
+      return json(res, 200, { state: !cfg ? 'unconfigured' : feishuBot?.status() ?? 'offline' });
+    }
+    if (path === '/api/feishu/restart' && req.method === 'POST') {
+      await restartFeishuBot();
+      const cfg = await loadFeishu();
+      return json(res, 200, { state: !cfg ? 'unconfigured' : feishuBot?.status() ?? 'offline' });
     }
 
     // —— 预置提示词 ——
@@ -452,4 +531,6 @@ server.listen(PORT, () => {
   } else {
     console.log(`claude-webui 开发服务: http://localhost:${actualPort}`);
   }
+  // 启动飞书机器人（未配置则跳过；失败不阻断 sidecar）。
+  void startFeishuBot().catch((e) => log('error', 'feishu 启动失败', { error: String(e) }));
 });

@@ -3,7 +3,6 @@ import type { ClaudeRunEvent } from '../claude/Runner.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
 import { handleCommand } from './commands.js';
 import { createAccumulator, toCard, Throttle } from './formatter.js';
-import { Notifier } from './Notifier.js';
 import { SessionState } from './SessionState.js';
 import type { FeishuConfig } from './feishuConfig.js';
 import type { FeishuSender } from './types.js';
@@ -20,7 +19,6 @@ export interface BotDeps {
   reader: ClaudeFileReader;
   sessionRunner: SessionRunner;
   state: SessionState;
-  notifier: Notifier;
   config: FeishuConfig;
   sender: FeishuSender;
   busySessionIds: () => Set<string>;

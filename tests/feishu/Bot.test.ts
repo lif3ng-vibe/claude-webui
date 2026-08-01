@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { FeishuBot } from '../../src/feishu/Bot.js';
 import { SessionRunner } from '../../src/claude/SessionRunner.js';
 import { SessionState } from '../../src/feishu/SessionState.js';
-import { Notifier } from '../../src/feishu/Notifier.js';
 import type { ClaudeRunEvent, ClaudeRunRequest } from '../../src/claude/Runner.js';
 import type { FeishuSender } from '../../src/feishu/types.js';
 import type { FeishuConfig } from '../../src/feishu/feishuConfig.js';
@@ -44,13 +43,11 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: strin
   const sessionRunner = new SessionRunner(fakeRunner, lock);
   const state = new SessionState(() => 1000);
   if (opts.current) state.set(opts.current);
-  const notifier = new Notifier(sender, {});
   const reader = { listProjects: async () => [], listSessions: async () => [] } as unknown as ClaudeFileReader;
   const bot = new FeishuBot({
     reader,
     sessionRunner,
     state,
-    notifier,
     config,
     sender,
     busySessionIds: () => new Set(lock),
