@@ -19,6 +19,14 @@ export interface ClaudeRunRequest {
   signal?: AbortSignal;
 }
 
+/** 创建新 session 的请求（不续接，在指定 cwd 启动新 Claude Code session）。 */
+export interface ClaudeNewRequest {
+  cwd: string;
+  prompt: string;
+  model?: string;
+  signal?: AbortSignal;
+}
+
 /** 从恢复的 session 流式返回的事件。 */
 export type ClaudeRunEvent =
   | { type: 'stream-json'; data: unknown }   // stdout 的一行 stream-json 解析对象
@@ -119,6 +127,25 @@ export class ClaudeRunner {
     // prompt 走 stdin 而非参数，避免 shell 注入（参数只剩 sessionId 与安全 flag）。
     // 已知限制：shell:true 下 child.kill 不一定杀掉 cmd 包裹的 node 进程，
     // 因此 Windows 上"停止"可能要等当前轮结束后才真正退出。
+    const child = spawn(this.claudeBin, args, {
+      cwd: req.cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+    });
+    if (child.stdin) {
+      child.stdin.write(req.prompt);
+      child.stdin.end();
+    }
+    yield* streamChildEvents(child, req.signal);
+  }
+
+  /**
+   * 在指定 cwd 启动**新** session（不带 --resume），prompt 经 stdin。
+   * 与 run() 的区别仅是不传 --resume/sessionId；新 session 的 id 从 stream-json 事件里提取。
+   */
+  async *runNew(req: ClaudeNewRequest): AsyncGenerator<ClaudeRunEvent> {
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
+    if (req.model) args.push('--model', req.model);
     const child = spawn(this.claudeBin, args, {
       cwd: req.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],

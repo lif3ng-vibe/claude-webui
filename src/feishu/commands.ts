@@ -12,6 +12,7 @@ export interface CommandContext {
 export type CommandResult =
   | { kind: 'reply'; card: FeishuCard }
   | { kind: 'reply-text'; text: string }
+  | { kind: 'new-session'; cwd: string; prompt: string }
   | { kind: 'stop' }
   | { kind: 'none' };
 
@@ -22,6 +23,7 @@ const HELP_TEXT = [
   '/sessions [目录关键字|页码] — 列出 session（用序号选择）',
   '/use <序号|sessionId 前缀> — 切换当前 session',
   '/info — 查看当前 session',
+  '/new <目录> <指令> — 在指定目录创建新 session',
   '/stop — 停止当前任务',
   '/help — 本帮助',
   '',
@@ -53,6 +55,9 @@ export async function handleCommand(text: string, ctx: CommandContext): Promise<
     case 'info':
     case 'pwd':
       return cmdInfo(ctx);
+    case 'new':
+    case 'n':
+      return cmdNew(arg);
     case 'stop':
       return { kind: 'stop' };
     case 'help':
@@ -110,6 +115,17 @@ function cmdUse(arg: string, ctx: CommandContext): CommandResult {
     kind: 'reply',
     card: mdCard('已切换 session', `\`${target.sessionId.slice(0, 8)}\`\n\n📂 ${target.cwd}`, 'turquoise'),
   };
+}
+
+function cmdNew(arg: string): CommandResult {
+  const parts = arg.trim().split(/\s+/);
+  const cwd = parts[0] || '';
+  const prompt = parts.slice(1).join(' ').trim();
+  if (!cwd) {
+    return { kind: 'reply-text', text: '用法：/new <目录> <首条指令>\n例：/new D:\\code\\demo 帮我初始化一个 node 项目' };
+  }
+  if (!prompt) return { kind: 'reply-text', text: '请提供首条指令：/new <目录> <指令>' };
+  return { kind: 'new-session', cwd, prompt };
 }
 
 function cmdInfo(ctx: CommandContext): CommandResult {

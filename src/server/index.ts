@@ -140,6 +140,7 @@ async function startAllFeishuApps(): Promise<void> {
         state,
         config: cfg,
         sender,
+        runner,
         busySessionIds: () => new Set(runningSessions),
         onFirstUser: async (openId) => {
           const cur = await loadFeishuApps();

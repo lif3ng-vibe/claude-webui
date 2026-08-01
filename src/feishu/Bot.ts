@@ -1,5 +1,6 @@
 import type { ClaudeFileReader } from '../claude/FileReader.js';
-import type { ClaudeRunEvent } from '../claude/Runner.js';
+import type { ClaudeRunEvent, ClaudeNewRequest } from '../claude/Runner.js';
+import { encodeCwd } from '../claude/pathEncoding.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
 import { handleCommand } from './commands.js';
 import { createAccumulator, toCard, Throttle } from './formatter.js';
@@ -21,6 +22,8 @@ export interface BotDeps {
   state: SessionState;
   config: FeishuApp;
   sender: FeishuSender;
+  /** 用于 /new 创建新 session（不经 SessionRunner 锁，Bot 内 newLock 防并发）。 */
+  runner: { runNew(req: ClaudeNewRequest): AsyncGenerator<ClaudeRunEvent> };
   busySessionIds: () => Set<string>;
   /** 白名单为空时，首个发消息者被认作创建人；此回调持久化其 open_id。 */
   onFirstUser?: (openId: string) => Promise<void>;
@@ -111,6 +114,10 @@ export class FeishuBot {
         await this.deps.sender.sendText('open_id', openId, '已请求停止当前任务。').catch(() => {});
         return;
       }
+      if (result.kind === 'new-session') {
+        await this.runNew(openId, result.cwd, result.prompt);
+        return;
+      }
       if (result.kind === 'reply') await this.deps.sender.sendCard('open_id', openId, result.card).catch(() => {});
       else if (result.kind === 'reply-text') await this.deps.sender.sendText('open_id', openId, result.text).catch(() => {});
       return;
@@ -172,4 +179,60 @@ export class FeishuBot {
     // 收尾定稿（排在流式 patch 之后）
     await this.serial(() => sendPatch(result.ok ? 'done' : 'error')).catch(() => {});
   }
+
+  private newLock = new Set<string>();
+
+  /** /new：在指定 cwd 创建新 session，跑首条指令，结束后把新 session 设为当前。 */
+  private async runNew(openId: string, cwd: string, prompt: string): Promise<void> {
+    const sender = this.deps.sender;
+    if (this.newLock.has(cwd)) {
+      await sender.sendText('open_id', openId, '该目录正在创建新 session，请稍候。').catch(() => {});
+      return;
+    }
+    this.newLock.add(cwd);
+    const ac = new AbortController();
+    this.currentAbort = ac;
+    const acc = createAccumulator();
+    const throttle = new Throttle(PATCH_INTERVAL_MS);
+    const startedAt = this.now();
+    let messageId: string | null = null;
+    let newSessionId: string | null = null;
+    const title = `new · ${prompt.slice(0, 30)}`;
+
+    const sendPatch = async (status: 'running' | 'done' | 'error'): Promise<void> => {
+      const card = toCard(acc, { title, status, cwd, elapsedMs: this.now() - startedAt });
+      if (!messageId) messageId = await sender.sendCard('open_id', openId, card);
+      else await sender.patchCard(messageId, card);
+    };
+
+    try {
+      for await (const ev of this.deps.runner.runNew({ cwd, prompt, signal: ac.signal })) {
+        acc.accumulate(ev);
+        if (!newSessionId && ev.type === 'stream-json') newSessionId = extractSessionId(ev.data);
+        const t = this.now();
+        if (throttle.shouldRun(t)) {
+          throttle.mark(t);
+          void this.serial(() => sendPatch('running'));
+        }
+      }
+      if (newSessionId) this.deps.state.set({ sessionId: newSessionId, dirName: encodeCwd(cwd), cwd });
+      await this.serial(() => sendPatch(newSessionId ? 'done' : 'error'));
+    } catch {
+      await this.serial(() => sendPatch('error')).catch(() => {});
+    } finally {
+      this.newLock.delete(cwd);
+      this.currentAbort = null;
+    }
+  }
+}
+
+/** 从 stream-json 事件提取 session_id（新建 session 后用于设为当前）。 */
+function extractSessionId(d: unknown): string | null {
+  if (!d || typeof d !== 'object') return null;
+  const o = d as Record<string, unknown>;
+  if (typeof o.session_id === 'string') return o.session_id;
+  if (typeof o.sessionId === 'string') return o.sessionId;
+  const msg = o.message as Record<string, unknown> | undefined;
+  if (msg && typeof msg.sessionId === 'string') return msg.sessionId;
+  return null;
 }

@@ -101,4 +101,14 @@ describe('commands handleCommand', () => {
     const r = await handleCommand('hello world', ctx(mockReader([], {})));
     expect(r.kind).toBe('none');
   });
+
+  it('/new <目录> <指令> 返回 new-session', async () => {
+    const r = await handleCommand('/new D:\\proj 跑测试', ctx(mockReader([], {})));
+    expect(r).toEqual({ kind: 'new-session', cwd: 'D:\\proj', prompt: '跑测试' });
+  });
+
+  it('/new 缺目录/指令提示用法', async () => {
+    expect((await handleCommand('/new', ctx(mockReader([], {})))).kind).toBe('reply-text');
+    expect((await handleCommand('/new D:\\proj', ctx(mockReader([], {})))).kind).toBe('reply-text');
+  });
 });

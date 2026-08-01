@@ -24,7 +24,7 @@ function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unkno
   return { sender, calls };
 }
 
-function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string } } = {}) {
+function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string } } = {}) {
   const { sender, calls } = mockSender();
   const lock = opts.lock ?? new Set<string>();
   const events =
@@ -33,9 +33,18 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: strin
       { type: 'stream-json', data: { type: 'assistant', message: { uuid: 'u1', content: [{ type: 'text', text: 'done' }] } } },
       { type: 'exit', code: 0 },
     ];
+  const newEvents =
+    opts.newEvents ??
+    [
+      { type: 'stream-json', data: { type: 'system', session_id: 'new-sess' } },
+      { type: 'exit', code: 0 },
+    ];
   const fakeRunner = {
     async *run(_req: ClaudeRunRequest): AsyncGenerator<ClaudeRunEvent> {
       for (const e of events) yield e;
+    },
+    async *runNew(): AsyncGenerator<ClaudeRunEvent> {
+      for (const e of newEvents) yield e;
     },
   };
   const sessionRunner = new SessionRunner(fakeRunner, lock);
@@ -50,6 +59,7 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: strin
     state,
     config: cfg,
     sender,
+    runner: fakeRunner,
     busySessionIds: () => new Set(lock),
     startListener: async () => {},
     now: () => 1000,
@@ -137,5 +147,18 @@ describe('FeishuBot handleMessage', () => {
     const { bot, state } = makeBot({ boundSession: { dirName: 'd1', sessionId: 'abc-123' } });
     await bot.start();
     expect(state.current()).toEqual({ sessionId: 'abc-123', dirName: 'd1', cwd: '/p' });
+  });
+
+  it('/new <目录> <指令> 创建新 session 并设为当前', async () => {
+    const { bot, state, calls } = makeBot({
+      newEvents: [
+        { type: 'stream-json', data: { type: 'system', session_id: 'new-xyz' } },
+        { type: 'exit', code: 0 },
+      ],
+    });
+    await bot.handleMessage({ openId: 'ou_me', text: '/new D:\\proj 跑测试', isMention: false });
+    expect(state.current()?.sessionId).toBe('new-xyz');
+    expect(state.current()?.cwd).toBe('D:\\proj');
+    expect(calls.some((c) => c.m === 'sendCard')).toBe(true);
   });
 });

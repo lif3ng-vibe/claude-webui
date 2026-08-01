@@ -226,6 +226,7 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **共享重构**：`src/claude/SessionRunner.ts` 把「锁→runner→lifecycle」抽成共享驱动器，web SSE、飞书卡片、本地通知都经此；`onFinished` 钩子供通知订阅（`source!=='feishu' && enableNotify && !aborted` 推送）。锁仍是同一个 `runningSessions` Set，web/终端/飞书三方互斥。
 - **端点**：`GET /api/config` 带 `publicFeishuApps`（数组，不回 secret）；`PUT /api/feishu/config`（存 apps 数组并重启所有 bot，不动 providers）；`GET /api/feishu/status`（`{apps:[{id,name,appId,state}]}`）；`POST /api/feishu/restart`。
 - **配置**（`~/.claude-webui/config.json` 的 `feishu.apps` 数组）：每个应用 `{id, name, appId, appSecret, allowedUserIds, domain(feishu|lark), enableNotify, chatIdForNotify, timeoutMs, boundSession:{dirName,sessionId}}`。旧的单 `feishu:{appId,...}` 自动迁移为 `apps[0]`。secret 留空保留旧值。
+- **命令**：`/sessions` `/use` `/info` `/new <目录> <指令>` `/stop` `/help`；纯文本续接当前 session。`/new` 在指定 cwd 创建新 session（`claude -p`，不带 `--resume`），从 stream-json 提取新 sessionId 设为当前。
 - **回传**：续接结果 create 一张交互卡片 → stream-json 累加（按 message uuid 去重取最新 content）→ 节流 `im.message.patch`（~1.2s）→ 收尾定稿；正文超长折叠；工具调用/结果用 markdown 代码块。
 - **前端**：`FeishuSettings.vue`（appId/secret/白名单/domain/通知开关/chat_id 表单 + 在线状态 3s 轮询徽标），挂在设置弹窗（与 `ProviderSettings` 并列）。
 - **打包**：`@larksuiteoapi/node-sdk`（纯 JS，含 axios/protobufjs/lodash/qs）esbuild 打进 `dist-server/server.js`（~6.3MB）。
