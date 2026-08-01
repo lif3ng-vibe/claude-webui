@@ -221,7 +221,7 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 
 在飞书里用命令切换并续接 Claude Code session，结果以交互卡片增量流式回传；本地（web 单发续接）任务完成/出错也推飞书。设计稿 `docs/superpowers/specs/2026-08-02-feishu-bot-design.md`，实现计划 `docs/superpowers/plans/2026-08-02-feishu-bot.md`。
 
-- **定位**：支持**多个飞书自建应用**（`config.feishu.apps` 数组），每个应用一个独立 Bot 实例、**绑定一个 Claude session**（发到该机器人的消息即续接它绑的 session；未绑定时可用 `/use` 命令切换）；桌面端托盘保活、sidecar 内每 app 跑一条飞书长连接（`@larksuiteoapi/node-sdk` 的 `lark.ws.Client`，出站即可、无需公网）；仅白名单 user_id 可触发，**白名单为空时首个发消息者自动认作创建人（owner）并持久化**；**连接成功后主动私聊 owner 上线消息**。机器人名/头像在飞书平台各自应用里设，代码改不了。
+- **定位**：支持**多个飞书自建应用**（`config.feishu.apps` 数组），每个应用一个独立 Bot 实例、**绑定一个 Claude session**（发到该机器人的消息即续接它绑的 session；未绑定时可用 `/use` 命令切换）；桌面端托盘保活、sidecar 内每 app 跑一条飞书长连接（`@larksuiteoapi/node-sdk` 的 `lark.ws.Client`，出站即可、无需公网）；仅白名单 user_id 可触发，**白名单为空时首个发消息者自动认作创建人（owner）并持久化**；**连接成功后主动私聊 owner 上线消息**。机器人名/头像在飞书平台各自应用里设；代码 best-effort 用「获取应用信息」API 读名字显示（自建应用常权限不足，读不到则用备注名）。
 - **后端模块**（`src/feishu/`）：`Bot.ts`（白名单+命令分流+流式续接卡片）、`commands.ts`（`/sessions` `/use` `/info` `/stop` `/help`）、`SessionState.ts`（全局 currentSession + 序号缓存 TTL）、`formatter.ts`（stream-json→飞书卡片 + `Throttle` 节流 + 超长折叠）、`Notifier.ts`（通知目标解析）、`feishuConfig.ts`（配置读写，secret 不回传）、`larkAdapter.ts`（封装飞书 SDK 为 `FeishuSender` + 长连接监听器，事件解析为 `BotMessageEvent`）。
 - **共享重构**：`src/claude/SessionRunner.ts` 把「锁→runner→lifecycle」抽成共享驱动器，web SSE、飞书卡片、本地通知都经此；`onFinished` 钩子供通知订阅（`source!=='feishu' && enableNotify && !aborted` 推送）。锁仍是同一个 `runningSessions` Set，web/终端/飞书三方互斥。
 - **端点**：`GET /api/config` 带 `publicFeishuApps`（数组，不回 secret）；`PUT /api/feishu/config`（存 apps 数组并重启所有 bot，不动 providers）；`GET /api/feishu/status`（`{apps:[{id,name,appId,state}]}`）；`POST /api/feishu/restart`。

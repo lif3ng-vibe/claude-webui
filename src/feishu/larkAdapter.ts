@@ -20,6 +20,31 @@ export function newLarkClient(cfg: FeishuApp): AnyClient {
   return new Client({ appId: cfg.appId, appSecret: cfg.appSecret, domain: domainOf(cfg.domain) });
 }
 
+/**
+ * best-effort 读取应用名（机器人显示名）。飞书「获取应用信息」API 对自建应用
+ * 读自己通常权限不足——读到返回名字，读不到（403/无权限）返回 undefined（回退备注名）。
+ */
+export async function getBotName(client: AnyClient, appId: string): Promise<string | undefined> {
+  try {
+    const resp = await client.request({
+      method: 'GET',
+      url: `/open-apis/application/v6/applications/${appId}`,
+      params: { lang: 'zh_cn' },
+    });
+    if (resp?.code !== 0) return undefined;
+    const name = resp?.data?.app_name;
+    if (typeof name === 'string' && name) return name;
+    if (name && typeof name === 'object') {
+      const n = name as Record<string, string>;
+      return n.zh_cn || n.en_us || Object.values(n)[0];
+    }
+    return undefined;
+  } catch {
+    /* 权限不足 / 网络错误：忽略，回退备注名 */
+    return undefined;
+  }
+}
+
 /** 用 lark client 实现 FeishuSender（发卡片 / 更新卡片 / 发文本）。 */
 export function createFeishuSender(client: AnyClient): FeishuSender {
   return {

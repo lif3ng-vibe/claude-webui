@@ -17,7 +17,7 @@ import { FeishuBot } from '../feishu/Bot.js';
 import { SessionState } from '../feishu/SessionState.js';
 import { Notifier } from '../feishu/Notifier.js';
 import { loadFeishuApps, publicFeishuApps, saveFeishuApps } from '../feishu/feishuConfig.js';
-import { newLarkClient, createFeishuSender, createFeishuListener } from '../feishu/larkAdapter.js';
+import { newLarkClient, createFeishuSender, createFeishuListener, getBotName } from '../feishu/larkAdapter.js';
 
 const STUDY_PROMPT =
   '你是一个资深工程师。用户会给你 Claude Code session 里的某一步记录和一个问题。' +
@@ -95,6 +95,7 @@ interface FeishuRuntime {
   bot: FeishuBot;
   notifier: Notifier;
   state: SessionState;
+  botName?: string;
 }
 const feishuRuntimes = new Map<string, FeishuRuntime>(); // 按 app.id
 const feishuListeners = new Map<string, { start: () => Promise<void>; stop: () => Promise<void> }>();
@@ -111,9 +112,12 @@ sessionRunner.onFinished = (info, source, req) => {
 };
 
 /** 所有已配置应用的状态（供前端徽标）。 */
-async function feishuStatusAll(): Promise<Array<{ id: string; name?: string; appId: string; state: string }>> {
+async function feishuStatusAll(): Promise<Array<{ id: string; name?: string; appId: string; botName?: string; state: string }>> {
   const apps = await publicFeishuApps();
-  return apps.map((a) => ({ id: a.id, name: a.name, appId: a.appId, state: feishuRuntimes.get(a.id)?.bot.status() ?? 'offline' }));
+  return apps.map((a) => {
+    const rt = feishuRuntimes.get(a.id);
+    return { id: a.id, name: a.name, appId: a.appId, botName: rt?.botName, state: rt?.bot.status() ?? 'offline' };
+  });
 }
 
 /** 按 config 启动所有飞书应用（已起的跳过；单个失败不阻断其它）。 */
@@ -157,6 +161,9 @@ async function startAllFeishuApps(): Promise<void> {
       });
       feishuRuntimes.set(cfg.id, { bot, notifier, state });
       await bot.start();
+      void getBotName(client, cfg.appId).then((n) => {
+        if (n) feishuRuntimes.get(cfg.id)!.botName = n;
+      });
       log('info', 'feishu: app 已启动', { app: cfg.id, domain: cfg.domain });
     } catch (e) {
       log('error', 'feishu: app 启动失败', { app: cfg.id, error: String(e) });

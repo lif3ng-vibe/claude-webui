@@ -88,11 +88,11 @@ async function onDirChange(app: EditApp, dir: string): Promise<void> {
 }
 
 // per-app 在线状态轮询（3s）。
-const statuses = ref<Record<string, string>>({});
+const statuses = ref<Record<string, { state: string; botName?: string }>>({});
 async function refreshStatus(): Promise<void> {
   try {
     const r = await feishuStatus();
-    statuses.value = Object.fromEntries(r.apps.map((a) => [a.id, a.state]));
+    statuses.value = Object.fromEntries(r.apps.map((a) => [a.id, { state: a.state, botName: a.botName }]));
   } catch {
     /* 忽略 */
   }
@@ -135,9 +135,9 @@ async function save(): Promise<void> {
 
       <div v-for="a in apps" :key="a.id" class="app-block">
         <div class="app-head">
-          <span class="state-dot" :class="statuses[a.id] ?? 'offline'" />
-          <span class="app-name">{{ a.name || a.appId || '新机器人' }}</span>
-          <span class="state-text">{{ statuses[a.id] === 'online' ? '在线' : '离线' }}</span>
+          <span class="state-dot" :class="statuses[a.id]?.state ?? 'offline'" />
+          <span class="app-name">{{ statuses[a.id]?.botName || a.name || a.appId || '新机器人' }}</span>
+          <span class="state-text">{{ statuses[a.id]?.state === 'online' ? '在线' : '离线' }}</span>
           <button class="ask" @click="removeApp(a.id)">删除</button>
         </div>
         <div class="row"><span class="lbl">名称</span><NInput v-model:value="a.name" size="small" placeholder="备注，如「项目A」" /></div>

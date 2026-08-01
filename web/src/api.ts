@@ -70,6 +70,7 @@ export interface FeishuAppStatus {
   id: string;
   name?: string;
   appId: string;
+  botName?: string;
   state: 'online' | 'offline';
 }
 
