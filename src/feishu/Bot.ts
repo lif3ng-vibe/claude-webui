@@ -22,6 +22,8 @@ export interface BotDeps {
   config: FeishuConfig;
   sender: FeishuSender;
   busySessionIds: () => Set<string>;
+  /** 白名单为空时，首个发消息者被认作创建人；此回调持久化其 open_id。 */
+  onFirstUser?: (openId: string) => Promise<void>;
   /** 启动事件监听（生产用 lark.ws.Client；测试注入 mock）。handler 收已解析事件。 */
   startListener: (handler: (ev: BotMessageEvent) => void) => Promise<void>;
   stopListener?: () => Promise<void>;
@@ -59,6 +61,13 @@ export class FeishuBot {
       void this.handleMessage(ev);
     });
     this.online = true;
+    // 上线后给创建人（白名单首位）私聊一条，确认连接成功。
+    const owner = this.deps.config.allowedUserIds[0];
+    if (owner) {
+      await this.deps.sender
+        .sendText('open_id', owner, '🤖 飞书机器人已上线。发送 /help 查看命令，或直接发文本续接当前 session。')
+        .catch(() => {});
+    }
   }
 
   async stop(): Promise<void> {
@@ -68,7 +77,17 @@ export class FeishuBot {
 
   async handleMessage(ev: BotMessageEvent): Promise<void> {
     const openId = ev.openId;
-    if (!this.deps.config.allowedUserIds.includes(openId)) {
+    const allowed = this.deps.config.allowedUserIds;
+    if (allowed.length === 0) {
+      // 白名单空：首个发消息者认作创建人（owner），入白名单 + 持久化，然后继续处理本条消息。
+      allowed.push(openId);
+      try {
+        await this.deps.onFirstUser?.(openId);
+      } catch {
+        /* 持久化失败不阻断当次回复 */
+      }
+      await this.deps.sender.sendText('open_id', openId, '已将你认作创建人并加入白名单。发送 /help 查看命令。').catch(() => {});
+    } else if (!allowed.includes(openId)) {
       await this.deps.sender.sendText('open_id', openId, '无权限：你不在白名单内。').catch(() => {});
       return;
     }

@@ -24,9 +24,7 @@ function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unkno
   return { sender, calls };
 }
 
-const config: FeishuConfig = { appId: 'a', appSecret: 's', allowedUserIds: ['ou_me'], domain: 'feishu', enableNotify: true };
-
-function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string> } = {}) {
+function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[] } = {}) {
   const { sender, calls } = mockSender();
   const lock = opts.lock ?? new Set<string>();
   const events =
@@ -43,18 +41,23 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; current?: { sessionId: strin
   const sessionRunner = new SessionRunner(fakeRunner, lock);
   const state = new SessionState(() => 1000);
   if (opts.current) state.set(opts.current);
+  const cfg: FeishuConfig = { appId: 'a', appSecret: 's', allowedUserIds: opts.allowed ? [...opts.allowed] : ['ou_me'], domain: 'feishu', enableNotify: true };
+  const onFirstCalls: string[] = [];
   const reader = { listProjects: async () => [], listSessions: async () => [] } as unknown as ClaudeFileReader;
   const bot = new FeishuBot({
     reader,
     sessionRunner,
     state,
-    config,
+    config: cfg,
     sender,
     busySessionIds: () => new Set(lock),
     startListener: async () => {},
     now: () => 1000,
+    onFirstUser: async (id: string) => {
+      onFirstCalls.push(id);
+    },
   });
-  return { bot, calls, state, lock };
+  return { bot, calls, state, lock, cfg, onFirstCalls };
 }
 
 describe('FeishuBot handleMessage', () => {
@@ -114,5 +117,19 @@ describe('FeishuBot handleMessage', () => {
     expect(bot.status()).toBe('offline');
     await bot.start();
     expect(bot.status()).toBe('online');
+  });
+
+  it('白名单空 → 首个发消息者被认作创建人', async () => {
+    const { bot, cfg, onFirstCalls, calls } = makeBot({ allowed: [] });
+    await bot.handleMessage({ openId: 'ou_first', text: '/help', isMention: false });
+    expect(cfg.allowedUserIds).toContain('ou_first');
+    expect(onFirstCalls).toEqual(['ou_first']);
+    expect(calls.some((c) => c.m === 'sendText' && String(c.text).includes('创建人'))).toBe(true);
+  });
+
+  it('start 后给 owner 发上线消息', async () => {
+    const { bot, calls } = makeBot();
+    await bot.start();
+    expect(calls.some((c) => c.m === 'sendText' && c.id === 'ou_me' && String(c.text).includes('已上线'))).toBe(true);
   });
 });

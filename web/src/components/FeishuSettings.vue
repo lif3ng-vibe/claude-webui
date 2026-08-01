@@ -81,7 +81,7 @@ async function save(): Promise<void> {
       </div>
       <div class="row"><span class="lbl">App ID</span><NInput v-model:value="appId" size="small" placeholder="cli_xxx" /></div>
       <div class="row"><span class="lbl">App Secret</span><NInput v-model:value="appSecret" type="password" show-password-on="click" size="small" :placeholder="hasSecret ? '留空保留已设值' : '飞书应用 secret'" /></div>
-      <div class="row"><span class="lbl">白名单 open_id</span><NInput v-model:value="allowed" type="textarea" :autosize="{ minRows: 2 }" size="small" placeholder="每行一个 ou_xxx（只有这些人能触发）" /></div>
+      <div class="row"><span class="lbl">白名单 open_id</span><NInput v-model:value="allowed" type="textarea" :autosize="{ minRows: 2 }" size="small" placeholder="留空则首个发消息者自动成为创建人；或每行一个 ou_xxx" /></div>
       <div class="row"><span class="lbl">域名</span><NSelect v-model:value="domain" :options="domainOptions" size="small" class="flex-1" /></div>
       <div class="row"><span class="lbl">完成通知</span><NSwitch v-model:value="enableNotify" size="small" /></div>
       <div class="row"><span class="lbl">通知群 chat_id</span><NInput v-model:value="chatIdForNotify" size="small" placeholder="可选；留空发本人单聊" /></div>

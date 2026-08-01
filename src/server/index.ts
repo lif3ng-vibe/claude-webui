@@ -127,6 +127,13 @@ async function startFeishuBot(): Promise<void> {
     config: cfg,
     sender,
     busySessionIds: () => new Set(runningSessions),
+    onFirstUser: async (openId) => {
+      const cur = await loadFeishu();
+      if (cur && cur.allowedUserIds.length === 0) {
+        await saveFeishu({ allowedUserIds: [openId] });
+        log('info', 'feishu: 已认主', { openId });
+      }
+    },
     startListener: async (handler) => {
       feishuListener = createFeishuListener(cfg, handler);
       await feishuListener.start();
