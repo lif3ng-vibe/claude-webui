@@ -25,13 +25,13 @@
 | 2 | 续接机制 | CLI 包裹（`claude --resume`），不重建消息发 API |
 | 3 | provider 半边 | 纯对话 + 预置系统提示词库；工具调用只用于"就 session 步骤深问" |
 | 4 | 磁盘工具作用域 | 只读；范围 = session cwd + `~/.claude`（只读）。无写入 |
-| 5 | CLI 执行模型 | 每条指令一次性 spawn `claude --resume <id> -p ... --output-format stream-json --dangerously-skip-permissions`；prompt 经 stdin 传入（非参数，避免 shell 注入）；per-`sessionId` 锁。`--resume` 默认不 fork（沿用同一 sessionId） |
+| 5 | CLI 执行模型 | 每条指令一次性 spawn `claude --resume <id> -p ... --output-format stream-json --dangerously-skip-permissions`；prompt 经 stdin 传入（非参数，避免 shell 注入）；per-`sessionId` 锁。`--resume` 默认不 fork（沿用同一 sessionId）。另有交互式终端（node-pty 常驻跑 `claude --resume`，见 §11），共享同锁 |
 | 6 | 权限 | 全开 `--dangerously-skip-permissions`；`ClaudeRunner` 接 `allowedTools`/`disallowedTools`（默认空 = skip），白名单是配置开关 |
 | 7 | providers | v1 只 Anthropic（对话/提示词测试/工具查证全走 Anthropic，家族内多模型对比）；多 provider **配置**已做（页面管理 + 持久化 + 切换），纯对话多 provider 可用；工具查证跨家仍只 Anthropic 兼容 |
 | 8 | 后端运行时 | Node + TypeScript |
 | 9 | 前端栈 | Vue 3 + Vite + TS + UnoCSS + VueUse + Naive UI + Pinia + @tanstack/vue-query + markdown-it + Shiki |
 | 10 | 对话 UI 路线 | 自写（无 chat 专用库）—— `assistant-ui` 只有 React，是选 Vue 的已知代价 |
-| 11 | 传输/存储 | SSE；JSON 文件存 `~/.claude-webui/`（`config.json`、`prompts.json`、`conversations/<id>.json`） |
+| 11 | 传输/存储 | SSE（对话/续接/深问）+ WebSocket（网页交互终端，§11）；JSON 文件存 `~/.claude-webui/`（`config.json`、`prompts.json`、`conversations/<id>.json`、`window-state.json`、`logs/sidecar.log`） |
 
 ## 4. 功能需求（已完成）
 
@@ -47,6 +47,7 @@
 - 选中 session 后底部 composer（textarea + 发送 + 停止，Ctrl/Cmd+Enter）。
 - 发送 → POST `/api/.../run` → SSE 流式：stream-json 按行解析为 assistant/tool/result/exit 的"虚线 live 块"追加到时间线。
 - 若该 session 正在另一终端运行（列表显示忙/闲），点继续弹"可能分叉"警告。
+- 另有**交互式终端**（网页里跑 `claude --resume` 的 TUI，§11），与单发 composer 并存、共享 per-sessionId 锁互斥；session 行/详情页 🖥 按钮进入。
 
 ### 4.3 深问（就 session 步骤向 LLM 提问）
 - 每条 user/assistant/tool 消息有 🔍问 按钮 → 弹问题 → POST `/api/study` → agent 循环（模型调 `read_file`/`list_files`/`grep` 只读工具 → 执行 → 回填 `tool_result` → 继续，最多 12 轮）→ 流式显示思考/工具/正文。
@@ -108,26 +109,32 @@ claude/
   pathEncoding.ts       # encodeCwd（+ 启发式 decode），单测
   FileReader.ts         # 只读访问 ~/.claude/projects/** + sessions（getRunningSessions）
   Runner.ts             # ClaudeRunner：包 claude --resume 一次性子进程；streamChildEvents 抽出便于测试
+terminal/
+  TerminalManager.ts    # 网页交互终端：node-pty 跑 claude --resume + WebSocket 收发/resize/锁（§11）
 tools/fsTools.ts        # 只读磁盘工具 read_file/list_files/grep + 路径越界防护
-server/index.ts         # node:http，所有 /api/* 端点 + SSE
+server/index.ts         # node:http，所有 /api/* 端点 + SSE + WebSocket(/api/terminal) 升级
 ```
+桌面壳（见 §10）：`electron/{main,preload}.ts`、`src-tauri/src/{lib,nodedl,sidecar,window_state}.rs`、`scripts/{build-server,dev-electron,build-electron,dist-electron,dev-tauri}.mjs`。
 ### 前端（`web/`，Vue 3 + Vite + TS）
 ```
 components/
-  SessionsView.vue   # Sessions 读侧 + 续接 + 深问 + 多选 + 拖动框选 + 运行状态 + ↗ 触发点
+  SessionsView.vue   # Sessions 读侧 + 续接 + 深问 + 多选 + 拖动框选 + 运行状态 + ↗/🖥 触发点
   ChatView.vue       # 对话 + 历史/加载/追问 + provider 选择 + ↗ 触发点
   ProviderSettings.vue # 多 provider 配置弹窗
+  TitleBar.vue       # 无边框自定义标题栏（仅桌面，§10）
 views/               # vue-router 双布局（history 模式）
-  MainApp.vue        # 主页 / （顶栏 Sessions/Chat tab，不走路由）
+  MainApp.vue        # 主页 / （顶栏 Sessions/Chat/服务 tab，不走路由）
   ItemLayout.vue     # 精简 shell（仅父子钻取间显示"← 返回"）
   DirPage.vue        # /projects/:dir 单工作目录
   SessionPage.vue    # /projects/:dir/sessions/:sid 单 session
   ConversationPage.vue # /conversations/:id 单对话 + 追问
+  ServicePage.vue    # /service 桌面端服务管理（§10）
+  TerminalPage.vue   # /terminal/:dir/:sid 网页交互终端（§11）
 router/index.ts      # 路由表 + beforeEach 设 type 级 title/favicon
 stores/
   session.ts  ui.ts  display.ts   # Pinia；display 用 useStorage 持久化到 localStorage
 composables/useConfig.ts  # /api/config
-lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon；openWindow=新窗口抽象；broadcast=跨窗口失效
+lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title/favicon；openWindow→desktop=桌面 bridge 抽象；broadcast=跨窗口失效
 ```
 
 ## 7. 端点
@@ -147,6 +154,7 @@ lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon
 | POST | `/api/chat` | 对话（SSE） |
 | POST | `/api/study` | 深问（SSE，含 request/messages 事件） |
 | GET | `/api/running` | 运行中会话状态 |
+| WS | `/api/terminal/:dir/:sid` | 网页交互终端（WebSocket + node-pty，§11；二进制=终端 IO，文本=resize/exit/error） |
 
 ## 8. 运行
 
@@ -165,16 +173,6 @@ lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon
 - ~~常驻交互执行模型（B）+ WebSocket 双向~~ —— 已做，见 §11。
 - SQLite 持久化（对话多到要搜索/分页时）。
 - `memory/` 浏览器、stats dashboard、history-prompt 视图。
-
-## 11. 网页交互终端（常驻 `claude --resume` + WebSocket）
-
-在浏览器里用 xterm.js 经 WebSocket 连后端 node-pty 跑 `claude --resume <sid> --dangerously-skip-permissions` 的交互式 TUI，能 `/命令`、实时来回——区别于 §4.2 的单发续接（`-p` 一次性 stream-json）。两套并存、共享 per-sessionId 锁（`runningSessions`）互斥。
-
-- **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。
-- **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。
-- **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。
-- **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，预编译按平台（不按 Node ABI），按需下载的 Node 22 直接兼容。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources`，sidecar prod env 设 `NODE_PATH=<resource_dir>[:<resource_dir>/node_modules]` 让 bundle 的 `require('node-pty')` 解析。
-- **CI per-arch**（§10.4 同 workflow）：mac 改 `macos-latest`(arm64) + `macos-13`(x64) 各自原生出包，弃 universal（避免 node-pty 跨 arch 预编译）；Electron `BUILD_ARCH` 传 `--arch`，Tauri `--target <triple>` + `rustup target add`。
 
 ## 10. 客户端（Electron + Tauri）
 
@@ -203,7 +201,18 @@ lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon
 
 ### 10.4 GitHub CI（`.github/workflows/build-desktop.yml`）
 - 触发：`push tag v*`（自动建 Release）+ `workflow_dispatch`（手动，仅 artifact）。
-- per-OS 矩阵（`windows-latest` + `macos-latest`）× {Electron, Tauri} = 4 job，各自原生出包；macOS 上交叉 arch（Electron universal dmg / Tauri `--target universal-apple-darwin`），一份覆盖 Intel+Apple Silicon。Windows 出 nsis/msi（x64）。全部未签名。
-- 脚本：Electron 用 `npm run dist:electron`（`electron-builder --publish never`，installer）；Tauri 用 `tauri build [--target universal-apple-darwin]`。CI 装根 + web 两套依赖。
-- `release` job 仅 tag 触发，用 `softprops/action-gh-release` 汇总所有 `.dmg/.exe/.msi` 上传。
+- per-OS + per-arch 矩阵：`windows-latest`(x64) + `macos-latest`(arm64) + `macos-13`(x64)，× {Electron, Tauri} = 6 job，各自原生出包。**弃 universal**：node-pty 是原生模块，per-arch runner 的 `npm ci` 自动拿本机 arch 预编译，无需跨 arch 抓取（实测 node-pty 1.x 预编译随包自带所有平台，见 §11）。Windows 出 nsis/msi（x64）。全部未签名。
+- 脚本：Electron `npm run dist:electron`（`BUILD_ARCH` 传 `--arch`，`electron-builder --publish never`）；Tauri `tauri build [--target <triple>]`（mac `rustup target add <triple>`）。CI 装根 + web 两套依赖。
+- `release` job 仅 tag 触发，用 `softprops/action-gh-release` 汇总所有 `.dmg/.exe/.msi` 上传；upload 按 `runner.os-arch` 命名 artifact。
 - 本地 `.cargo/config.toml`（国内 rsproxy 镜像）已 gitignore，CI 走默认 crates.io。
+- 已知：`macos-13`（Intel）runner 偶发排队拥堵；可改在 `macos-latest` 交叉编 x64（node-pty 预编译已自带）绕开，见 §11 风险。
+
+## 11. 网页交互终端（常驻 `claude --resume` + WebSocket）
+
+在浏览器里用 xterm.js 经 WebSocket 连后端 node-pty 跑 `claude --resume <sid> --dangerously-skip-permissions` 的交互式 TUI，能 `/命令`、实时来回——区别于 §4.2 的单发续接（`-p` 一次性 stream-json）。两套并存、共享 per-sessionId 锁（`runningSessions`）互斥。
+
+- **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。
+- **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。
+- **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。
+- **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，**预编译按平台且随 npm 包自带所有平台**（`prebuilds/{darwin-arm64,darwin-x64,win32-*}`），按需下载的 Node 22 直接兼容，无需匹配 Node ABI、无需跨 arch 抓取。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources`，sidecar prod env 设 `NODE_PATH=<resource_dir>[:<resource_dir>/node_modules]` 让 bundle 的 `require('node-pty')` 解析。
+- **风险/待办**：完整 dev/prod 终端在桌面安装包里跑通需实测（node-pty 预编译随包、Tauri `NODE_PATH` 解析）；CI 的 `macos-13`（Intel）runner 偶发排队拥堵——因 node-pty 预编译已自带 darwin-x64，可把 mac x64 改到 `macos-latest` 交叉编（Tauri `--target x86_64-apple-darwin` + `rustup target add`；Electron `--x64`）绕开，无需 Intel runner。
