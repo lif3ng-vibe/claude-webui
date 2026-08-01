@@ -6,6 +6,7 @@ import { useConfig } from '../composables/useConfig';
 import SessionsView from '../components/SessionsView.vue';
 import ChatView from '../components/ChatView.vue';
 import ProviderSettings from '../components/ProviderSettings.vue';
+import FeishuSettings from '../components/FeishuSettings.vue';
 import ServicePage from '../views/ServicePage.vue';
 import { isDesktop } from '../lib/desktop';
 import { openWindow } from '../lib/openWindow';
@@ -39,6 +40,9 @@ const modelInfo = computed(() => {
     </div>
   </div>
   <NModal v-model:show="settingsOpen" :mask-closable="true">
-    <ProviderSettings @close="settingsOpen = false" />
+    <div class="flex flex-col gap-2">
+      <ProviderSettings @close="settingsOpen = false" />
+      <FeishuSettings @close="settingsOpen = false" />
+    </div>
   </NModal>
 </template>

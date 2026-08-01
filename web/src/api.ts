@@ -35,9 +35,30 @@ export interface PublicProvider {
   isEnv?: boolean;
 }
 
+export interface PublicFeishuConfig {
+  appId: string;
+  allowedUserIds: string[];
+  domain: 'feishu' | 'lark';
+  enableNotify: boolean;
+  chatIdForNotify?: string;
+  hasSecret: boolean;
+  timeoutMs?: number | null;
+}
+
+export interface FeishuInput {
+  appId?: string;
+  appSecret?: string;
+  allowedUserIds?: string[];
+  domain?: 'feishu' | 'lark';
+  enableNotify?: boolean;
+  chatIdForNotify?: string;
+  timeoutMs?: number | null;
+}
+
 export interface ConfigResponse {
   providers: PublicProvider[];
   activeProviderId: string;
+  feishu?: PublicFeishuConfig | null;
 }
 
 export interface RunningSessionInfo {
@@ -97,6 +118,24 @@ export async function saveConfig(providers: ProviderInput[], activeProviderId: s
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()) as ConfigResponse;
+}
+
+export async function saveFeishu(feishu: FeishuInput): Promise<PublicFeishuConfig | null> {
+  const r = await fetch('/api/feishu/config', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(feishu),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.json()) as PublicFeishuConfig | null;
+}
+export async function feishuStatus(): Promise<{ state: 'online' | 'offline' | 'unconfigured' }> {
+  return getJSON<{ state: 'online' | 'offline' | 'unconfigured' }>('/api/feishu/status');
+}
+export async function feishuRestart(): Promise<{ state: string }> {
+  const r = await fetch('/api/feishu/restart', { method: 'POST' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
 export const api = {

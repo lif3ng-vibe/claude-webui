@@ -416,6 +416,11 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       const cfg = await loadFeishu();
       return json(res, 200, { state: !cfg ? 'unconfigured' : feishuBot?.status() ?? 'offline' });
     }
+    if (path === '/api/feishu/config' && req.method === 'PUT') {
+      const b = await readBody(req);
+      await saveFeishu(b);
+      return json(res, 200, await publicFeishu());
+    }
 
     // —— 预置提示词 ——
     if (path === '/api/prompts' && req.method === 'GET') return json(res, 200, await prompts.list());
