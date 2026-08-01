@@ -20,6 +20,9 @@ const result = await build({
   target: 'node22',
   sourcemap: true,
   legalComments: 'none',
+  // node-pty 是原生模块（N-API 预编译），不能打进单文件 bundle；external 后运行时从 node_modules 解析。
+  // ws 是纯 JS，仍打进。
+  external: ['node-pty'],
   // banner 注入 createRequire：防御 CJS 依赖（如 @anthropic-ai/sdk 的可选动态 require）在 ESM bundle 里需要 require。
   banner: {
     js: "import { createRequire as __createRequire } from 'module';\nconst require = __createRequire(import.meta.url);",

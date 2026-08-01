@@ -91,6 +91,9 @@ function popDir(p: ProjectEntry): void {
 function popSession(dir: string, sid: string): void {
   openWindow(`/projects/${encodeURIComponent(dir)}/sessions/${encodeURIComponent(sid)}`);
 }
+function popTerminal(dir: string, sid: string): void {
+  openWindow(`/terminal/${encodeURIComponent(dir)}/${encodeURIComponent(sid)}`);
+}
 
 function toggle(p: ProjectEntry): void {
   const s = new Set(expanded.value);
@@ -497,6 +500,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 <div class="sess-head">
                   <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
                   <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)">📋</button>
+                  <button class="icon-btn-sm" title="在终端中打开（交互式 resume）" @click.stop="popTerminal(node.p.dirName, s.sessionId)">🖥</button>
                   <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(node.p.dirName, s.sessionId)">↗</button>
                 </div>
                 <div v-if="runningMap.has(s.sessionId)" class="run-badge" :class="runningMap.get(s.sessionId)"><span class="run-dot"></span>{{ runLabel(runningMap.get(s.sessionId)) }}</div>

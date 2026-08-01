@@ -145,12 +145,20 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
         let res = app.path().resource_dir().map_err(|e| e.to_string())?;
         let server = res.join("dist-server").join("server.js");
         let web_dir = res.join("web");
+        // node-pty 作 resource 随包（见 tauri.conf.json resources），bundle 的 require('node-pty')
+        // 经 NODE_PATH 解析：resource_dir 下（Tauri 保留 node_modules/node-pty 结构）与 node_modules 子目录都覆盖。
+        let node_path = if cfg!(windows) {
+            format!("{};{}\\node_modules", res.display(), res.display())
+        } else {
+            format!("{}:{}/node_modules", res.display(), res.display())
+        };
         let mut c = Command::new(node);
         c.arg(&server);
         c.env("PORT", "0");
         c.env("CLAUDE_WEBUI_HANDSHAKE", "1");
         c.env("CLAUDE_WEBUI_BUNDLE", "1");
         c.env("CLAUDE_WEBUI_WEB_DIR", web_dir);
+        c.env("NODE_PATH", node_path);
         c
     };
 

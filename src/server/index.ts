@@ -10,6 +10,8 @@ import { resolveProvider, publicConfig, saveProviders } from '../config.js';
 import { conversations, type Conversation, type ConvMessage } from '../conversations.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
+import { WebSocketServer, type WebSocket } from 'ws';
+import { createTerminalHandler } from '../terminal/TerminalManager.js';
 
 const STUDY_PROMPT =
   '你是一个资深工程师。用户会给你 Claude Code session 里的某一步记录和一个问题。' +
@@ -415,6 +417,22 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   } catch (e) {
     json(res, 500, { error: String(e) });
   }
+});
+
+// 网页交互终端：在同一个 http server 上挂 WebSocket（noServer + 手动 upgrade，按路径路由）。
+const terminalHandler = createTerminalHandler(reader, runningSessions);
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  const m = req.url?.match(/^\/api\/terminal\/([^/]+)\/([^/]+)$/);
+  if (!m) {
+    socket.destroy();
+    return;
+  }
+  const dirName = decodeURIComponent(m[1]);
+  const sessionId = decodeURIComponent(m[2]);
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    terminalHandler(ws as WebSocket, dirName, sessionId);
+  });
 });
 
 server.listen(PORT, () => {

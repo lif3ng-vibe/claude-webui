@@ -16,5 +16,9 @@ function run(cmd, args) {
 await run('npm', ['run', 'build:web']);
 await run('npm', ['run', 'build:server']);
 await run('npx', ['tsc', '-p', 'electron/tsconfig.json']);
-// --publish never：仅本地产出，不推任何发布渠道。mac 出 universal dmg，win 出 nsis exe（见 package.json build 配置）。
-await run('npx', ['electron-builder', '--publish', 'never']);
+// --publish never：仅本地产出，不推任何发布渠道。
+// mac 按 arch 出 dmg（CI 传 BUILD_ARCH=arm64|x64，对应 --arm64|--x64）；win 出 nsis exe，无 arch。
+const arch = process.env.BUILD_ARCH;
+const builderArgs = ['electron-builder', '--publish', 'never'];
+if (arch) builderArgs.push(`--${arch}`);
+await run('npx', builderArgs);

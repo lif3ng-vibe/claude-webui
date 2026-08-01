@@ -162,9 +162,19 @@ lib/{render,sse,shiki,head,openWindow,broadcast}.ts  # head=动态 title/favicon
 
 - 多 provider **工具查证**跨家：OpenAI 兼容 function-calling 格式与 Anthropic tool-use 不同，需 adapter 适配（纯对话多 provider 已可用）。
 - 磁盘工具写入（沙盒临时目录）。
-- 常驻交互执行模型（B）+ WebSocket 双向。
+- ~~常驻交互执行模型（B）+ WebSocket 双向~~ —— 已做，见 §11。
 - SQLite 持久化（对话多到要搜索/分页时）。
 - `memory/` 浏览器、stats dashboard、history-prompt 视图。
+
+## 11. 网页交互终端（常驻 `claude --resume` + WebSocket）
+
+在浏览器里用 xterm.js 经 WebSocket 连后端 node-pty 跑 `claude --resume <sid> --dangerously-skip-permissions` 的交互式 TUI，能 `/命令`、实时来回——区别于 §4.2 的单发续接（`-p` 一次性 stream-json）。两套并存、共享 per-sessionId 锁（`runningSessions`）互斥。
+
+- **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。
+- **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。
+- **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。
+- **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，预编译按平台（不按 Node ABI），按需下载的 Node 22 直接兼容。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources`，sidecar prod env 设 `NODE_PATH=<resource_dir>[:<resource_dir>/node_modules]` 让 bundle 的 `require('node-pty')` 解析。
+- **CI per-arch**（§10.4 同 workflow）：mac 改 `macos-latest`(arm64) + `macos-13`(x64) 各自原生出包，弃 universal（避免 node-pty 跨 arch 预编译）；Electron `BUILD_ARCH` 传 `--arch`，Tauri `--target <triple>` + `rustup target add`。
 
 ## 10. 客户端（Electron + Tauri）
 

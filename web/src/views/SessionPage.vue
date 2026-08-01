@@ -65,6 +65,9 @@ function copyResume(): void {
 function popCurrent(): void {
   openWindow(`/projects/${encodeURIComponent(dir.value)}/sessions/${encodeURIComponent(sid.value)}`);
 }
+function popTerminal(): void {
+  openWindow(`/terminal/${encodeURIComponent(dir.value)}/${encodeURIComponent(sid.value)}`);
+}
 
 const promptInput = ref('');
 const running = ref(false);
@@ -363,6 +366,7 @@ function refresh(): void {
         </div>
       </NPopover>
       <button class="ask" title="复制 resume 命令" @click="copyResume">📋</button>
+      <button class="ask" title="在终端中打开（交互式 resume）" @click="popTerminal">🖥</button>
       <button class="ask popout" title="新窗口打开该 session" @click="popCurrent">↗</button>
       <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
       <button v-if="selectedMsgs.size" class="ask" @click="clearSelection()">取消选中</button>
