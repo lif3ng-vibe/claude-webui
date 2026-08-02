@@ -17,6 +17,8 @@ export interface ProviderConfig {
   authToken?: string;
   apiKey?: string;
   model: string;
+  /** provider 协议类型；默认 anthropic。openai = OpenAI 兼容（/v1/chat/completions）。 */
+  type?: 'anthropic' | 'openai';
 }
 
 export interface AppConfig {
@@ -66,6 +68,7 @@ export interface PublicProvider {
   model: string;
   hasAuth: boolean;
   isEnv?: boolean;
+  type?: 'anthropic' | 'openai';
 }
 
 export async function publicConfig(): Promise<{ providers: PublicProvider[]; activeProviderId: string; hasGatewayKey: boolean }> {
@@ -74,7 +77,7 @@ export async function publicConfig(): Promise<{ providers: PublicProvider[]; act
   const list: PublicProvider[] = [];
   const env = envProvider();
   if (env) list.push({ id: 'env', name: env.name, baseURL: env.baseURL, model: stripModelSuffix(env.model), hasAuth: Boolean(env.authToken || env.apiKey), isEnv: true });
-  for (const p of saved) list.push({ id: p.id, name: p.name, baseURL: p.baseURL, model: stripModelSuffix(p.model), hasAuth: Boolean(p.authToken || p.apiKey) });
+  for (const p of saved) list.push({ id: p.id, name: p.name, baseURL: p.baseURL, model: stripModelSuffix(p.model), hasAuth: Boolean(p.authToken || p.apiKey), type: p.type });
   const active = c.activeProviderId && list.some((p) => p.id === c.activeProviderId) ? c.activeProviderId : (list[0]?.id ?? '');
   return { providers: list, activeProviderId: active, hasGatewayKey: Boolean(c.gatewayKey) };
 }

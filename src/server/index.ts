@@ -13,7 +13,7 @@ import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createTerminalHandler } from '../terminal/TerminalManager.js';
-import { handleMessages } from '../gateway/routes.js';
+import { handleMessages, handleChatCompletions } from '../gateway/routes.js';
 import { listLogs, getLog, removeLog } from '../gateway/store.js';
 import { FeishuBot } from '../feishu/Bot.js';
 import { SessionState } from '../feishu/SessionState.js';
@@ -408,6 +408,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   try {
     if (path === '/v1/messages' && req.method === 'POST') {
       return await handleMessages(req, res);
+    }
+    if (path === '/v1/chat/completions' && req.method === 'POST') {
+      return await handleChatCompletions(req, res);
     }
     if (path === '/' && req.method === 'GET') {
       try {

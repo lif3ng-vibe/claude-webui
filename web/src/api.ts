@@ -33,6 +33,7 @@ export interface PublicProvider {
   model: string;
   hasAuth: boolean;
   isEnv?: boolean;
+  type?: 'anthropic' | 'openai';
 }
 
 export interface BoundSession {
@@ -135,6 +136,7 @@ export interface ProviderInput {
   model: string;
   authToken?: string;
   apiKey?: string;
+  type?: 'anthropic' | 'openai';
 }
 
 async function getJSON<T>(url: string): Promise<T> {

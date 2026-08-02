@@ -20,17 +20,21 @@ watch(
   configQuery.data,
   (c: ConfigResponse | undefined) => {
     if (!c) return;
-    providers.value = c.providers.map((p) => ({ id: p.id, name: p.name, baseURL: p.baseURL, model: p.model, authToken: '', apiKey: '', isEnv: p.isEnv }));
+    providers.value = c.providers.map((p) => ({ id: p.id, name: p.name, baseURL: p.baseURL, model: p.model, authToken: '', apiKey: '', isEnv: p.isEnv, type: p.type ?? 'anthropic' }));
     activeId.value = c.activeProviderId;
   },
   { immediate: true },
 );
 
 const activeOptions = computed(() => providers.value.map((p) => ({ label: p.name || p.id, value: p.id })));
+const typeOptions = [
+  { label: 'Anthropic（/v1/messages）', value: 'anthropic' },
+  { label: 'OpenAI（/v1/chat/completions）', value: 'openai' },
+];
 
 function addProvider(): void {
   const id = 'p' + Date.now();
-  providers.value.push({ id, name: '新 provider', baseURL: '', model: '', authToken: '', apiKey: '' });
+  providers.value.push({ id, name: '新 provider', baseURL: '', model: '', authToken: '', apiKey: '', type: 'anthropic' });
   activeId.value = id;
 }
 
@@ -42,7 +46,7 @@ function removeProvider(id: string): void {
 async function save(): Promise<void> {
   const editable: ProviderInput[] = providers.value
     .filter((p) => !p.isEnv)
-    .map((p) => ({ id: p.id, name: p.name, baseURL: p.baseURL, model: p.model, authToken: p.authToken, apiKey: p.apiKey }));
+    .map((p) => ({ id: p.id, name: p.name, baseURL: p.baseURL, model: p.model, authToken: p.authToken, apiKey: p.apiKey, type: p.type }));
   try {
     await saveConfig(editable, activeId.value);
     await queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -68,6 +72,7 @@ async function save(): Promise<void> {
           <button v-if="!p.isEnv" class="ask" @click="removeProvider(p.id)">删除</button>
         </div>
         <div class="row"><span class="lbl">名称</span><NInput v-model:value="p.name" :disabled="p.isEnv" size="small" /></div>
+        <div class="row"><span class="lbl">类型</span><NSelect v-model:value="p.type" :disabled="p.isEnv" :options="typeOptions" size="small" /></div>
         <div class="row"><span class="lbl">baseURL</span><NInput v-model:value="p.baseURL" :disabled="p.isEnv" size="small" placeholder="https://api.anthropic.com" /></div>
         <div class="row"><span class="lbl">model</span><NInput v-model:value="p.model" :disabled="p.isEnv" size="small" placeholder="glm-5.2:cloud / claude-sonnet-5" /></div>
         <div class="row"><span class="lbl">authToken</span><NInput v-model:value="p.authToken" type="password" show-password-on="click" size="small" :placeholder="p.isEnv ? '(env)' : '留空保留已设值'" /></div>

@@ -235,14 +235,14 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 
 ## 13. 中转网关（多 provider 代理 + 请求查看）
 
-claude-webui 充当**可观测的 LLM 网关**：外部工具（Claude Code / Cursor / 脚本）把 base URL 指向本服务，请求透传到配置的 provider，每次请求的提示词与返回都可查看。设计稿 `docs/superpowers/specs/2026-08-02-gateway-p1-design.md`。**P1 只做 Anthropic 兼容透传**；OpenAI 端点/provider、全转换矩阵留 P2/P3。
+claude-webui 充当**可观测的 LLM 网关**：外部工具（Claude Code / Cursor / 脚本）把 base URL 指向本服务，请求转发到配置的 provider，每次请求的提示词与返回都可查看。设计稿 `docs/superpowers/specs/2026-08-02-gateway-p1-design.md`。对外 **OpenAI（`/v1/chat/completions`）+ Anthropic（`/v1/messages`）双兼容**；后端 provider.type 可选 `anthropic`/`openai`；同格式字节透传、跨格式自动转换。
 
-- **模块** `src/gateway/`：`routes.ts`（透传+model 路由+记录）、`parseSse.ts`（流式 SSE 响应解析成 {content,stop_reason,usage}）、`recorder.ts`/`store.ts`（记录 CRUD）、`auth.ts`（可选 gateway key）。
-- **透传**：**不用** `AnthropicProvider`（它跑 agent 循环 + 把 messages 压成单 text block，破坏保真）；用 `fetch` 字节级透传——请求体原样转发到 `provider.baseURL/v1/messages`，响应流边 pipe 给客户端边 tee 累积。认证 header 替换为 provider 凭证，`anthropic-version` 透传。
+- **模块** `src/gateway/`：`routes.ts`（4 路径分发：两端点 × 两后端，同格式透传 / 跨格式转换 + 记录）、`convert.ts`（请求/响应 OpenAI⇄Anthropic）、`streamConvert.ts`（流式双向事件状态机）、`parseSse.ts`、`recorder.ts`/`store.ts`（记录 CRUD）、`auth.ts`（可选 gateway key）。
+- **透传 / 转换**：同格式（入参=后端类型）用 `fetch` 字节透传；跨格式则入参 body 经 convert 转成后端格式发出、响应经 convert/streamConvert 转回客户端格式（流式边读后端 SSE 边转边发）。**不用** `AnthropicProvider`（它跑 agent 循环 + 压缩 messages，破坏保真）。认证 header 替换为 provider 凭证，`anthropic-version` 透传（anthropic 后端）。
 - **路由**：`body.model` 精确匹配 provider.model（去后缀比较），无匹配用活动 provider。
 - **记录**：`~/.claude-webui/gateway/<id>.json`，`{id,createdAt,providerId,model,stream,request,response,elapsedMs,status,error?}`。
 - **认证**：可选 `gatewayKey`（config，留空=本地不校验）；客户端带 `x-api-key` 或 `Authorization: Bearer`。
-- **端点**：`POST /v1/messages`（中转入口）；`GET /api/gateway/logs?q`、`GET/DELETE /api/gateway/logs/:id`、`PUT /api/gateway/key`。
+- **端点**：`POST /v1/messages`（Anthropic 入参）、`POST /v1/chat/completions`（OpenAI 入参）；`GET /api/gateway/logs?q`、`GET/DELETE /api/gateway/logs/:id`、`PUT /api/gateway/key`。
 - **前端**：`GatewayLog.vue`（列表+详情，复用 `renderContent` 渲染 request/response）+ MainApp 顶栏「中转」tab + 网关 key 设置。
-- **交付边界**：真实联调需用户配 provider（baseURL/key/model）并把工具 base URL 指向本服务；流式 SSE pipe 在 Node 18+ fetch 上实测。
-- **风险/待办（P1）**：fetch SSE 流式 pipe 稳定性；headers 透传边界；长响应记录截断策略。**P2**：OpenAI provider + `/v1/chat/completions`。**P3**：OpenAI↔Anthropic 全转换矩阵 + 增强 model 路由。
+- **交付边界**：真实联调需用户配 provider（baseURL/key/model/type）并把工具 base URL 指向本服务；流式 SSE pipe / 跨格式流式转换在 Node 18+ fetch 上实测。
+- **风险/待办**：跨格式流式转换为事件级（覆盖 text/tool_use/finish，不保证字节等价，不支持多模态 image / thinking 转换）；headers 透传边界；OpenAI 系 provider 真实联调待测。
