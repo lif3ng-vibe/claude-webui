@@ -232,3 +232,17 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **打包**：`@larksuiteoapi/node-sdk`（纯 JS，含 axios/protobufjs/lodash/qs）esbuild 打进 `dist-server/server.js`（~6.3MB）。
 - **交付边界**：真实飞书联调需用户在飞书开放平台建应用、配「机器人 + 长连接事件 `im.message.receive_v1` + `im:message` 权限」、填 appId/secret/白名单 open_id（见 spec §13）。代码做到配置后即用 + 单测 mock 覆盖（78 测试）。
 - **风险/待办**：飞书卡片 markdown 与标准差异（表格/嵌套列表降级为纯文本）；`patch` 频率限制节流参数需实测调；Windows `shell:true` 下 `/stop` 可能延迟；dev/prod 在桌面安装包里 bot 随 sidecar 常驻需实测。
+
+## 13. 中转网关（多 provider 代理 + 请求查看）
+
+claude-webui 充当**可观测的 LLM 网关**：外部工具（Claude Code / Cursor / 脚本）把 base URL 指向本服务，请求透传到配置的 provider，每次请求的提示词与返回都可查看。设计稿 `docs/superpowers/specs/2026-08-02-gateway-p1-design.md`。**P1 只做 Anthropic 兼容透传**；OpenAI 端点/provider、全转换矩阵留 P2/P3。
+
+- **模块** `src/gateway/`：`routes.ts`（透传+model 路由+记录）、`parseSse.ts`（流式 SSE 响应解析成 {content,stop_reason,usage}）、`recorder.ts`/`store.ts`（记录 CRUD）、`auth.ts`（可选 gateway key）。
+- **透传**：**不用** `AnthropicProvider`（它跑 agent 循环 + 把 messages 压成单 text block，破坏保真）；用 `fetch` 字节级透传——请求体原样转发到 `provider.baseURL/v1/messages`，响应流边 pipe 给客户端边 tee 累积。认证 header 替换为 provider 凭证，`anthropic-version` 透传。
+- **路由**：`body.model` 精确匹配 provider.model（去后缀比较），无匹配用活动 provider。
+- **记录**：`~/.claude-webui/gateway/<id>.json`，`{id,createdAt,providerId,model,stream,request,response,elapsedMs,status,error?}`。
+- **认证**：可选 `gatewayKey`（config，留空=本地不校验）；客户端带 `x-api-key` 或 `Authorization: Bearer`。
+- **端点**：`POST /v1/messages`（中转入口）；`GET /api/gateway/logs?q`、`GET/DELETE /api/gateway/logs/:id`、`PUT /api/gateway/key`。
+- **前端**：`GatewayLog.vue`（列表+详情，复用 `renderContent` 渲染 request/response）+ MainApp 顶栏「中转」tab + 网关 key 设置。
+- **交付边界**：真实联调需用户配 provider（baseURL/key/model）并把工具 base URL 指向本服务；流式 SSE pipe 在 Node 18+ fetch 上实测。
+- **风险/待办（P1）**：fetch SSE 流式 pipe 稳定性；headers 透传边界；长响应记录截断策略。**P2**：OpenAI provider + `/v1/chat/completions`。**P3**：OpenAI↔Anthropic 全转换矩阵 + 增强 model 路由。

@@ -25,6 +25,8 @@ export interface AppConfig {
   maxTokens?: number;
   /** 飞书机器人配置（结构见 src/feishu/feishuConfig.ts）。 */
   feishu?: Record<string, unknown>;
+  /** 中转网关可选 key（留空=本地不校验）。 */
+  gatewayKey?: string;
   // 旧字段（兼容/兜底）
   anthropicApiKey?: string;
   anthropicAuthToken?: string;
@@ -66,7 +68,7 @@ export interface PublicProvider {
   isEnv?: boolean;
 }
 
-export async function publicConfig(): Promise<{ providers: PublicProvider[]; activeProviderId: string }> {
+export async function publicConfig(): Promise<{ providers: PublicProvider[]; activeProviderId: string; hasGatewayKey: boolean }> {
   const c = await loadConfig();
   const saved = c.providers ?? [];
   const list: PublicProvider[] = [];
@@ -74,7 +76,16 @@ export async function publicConfig(): Promise<{ providers: PublicProvider[]; act
   if (env) list.push({ id: 'env', name: env.name, baseURL: env.baseURL, model: stripModelSuffix(env.model), hasAuth: Boolean(env.authToken || env.apiKey), isEnv: true });
   for (const p of saved) list.push({ id: p.id, name: p.name, baseURL: p.baseURL, model: stripModelSuffix(p.model), hasAuth: Boolean(p.authToken || p.apiKey) });
   const active = c.activeProviderId && list.some((p) => p.id === c.activeProviderId) ? c.activeProviderId : (list[0]?.id ?? '');
-  return { providers: list, activeProviderId: active };
+  return { providers: list, activeProviderId: active, hasGatewayKey: Boolean(c.gatewayKey) };
+}
+
+/** 保存中转网关 key（undefined=不改；''=清除；其它=设置）。 */
+export async function saveGatewayKey(key: string | undefined): Promise<void> {
+  const cur = await loadConfig();
+  if (key === undefined) return;
+  const next: AppConfig = { ...cur, gatewayKey: key || undefined };
+  await mkdir(configDir(), { recursive: true });
+  await writeFile(configPath(), JSON.stringify(next, null, 2), 'utf8');
 }
 
 /** 保存 providers（密钥留空时保留已有值）+ activeProviderId。 */

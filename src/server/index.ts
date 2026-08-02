@@ -7,12 +7,14 @@ import { ClaudeRunner } from '../claude/Runner.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
-import { resolveProvider, publicConfig, saveProviders } from '../config.js';
+import { resolveProvider, publicConfig, saveProviders, saveGatewayKey } from '../config.js';
 import { conversations, type Conversation, type ConvMessage } from '../conversations.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { createTerminalHandler } from '../terminal/TerminalManager.js';
+import { handleMessages } from '../gateway/routes.js';
+import { listLogs, getLog, removeLog } from '../gateway/store.js';
 import { FeishuBot } from '../feishu/Bot.js';
 import { SessionState } from '../feishu/SessionState.js';
 import { Notifier } from '../feishu/Notifier.js';
@@ -404,6 +406,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const path = url.pathname;
   try {
+    if (path === '/v1/messages' && req.method === 'POST') {
+      return await handleMessages(req, res);
+    }
     if (path === '/' && req.method === 'GET') {
       try {
         const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
@@ -453,6 +458,32 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       await saveFeishuApps(Array.isArray(b.apps) ? b.apps : []);
       await restartAllFeishuApps();
       return json(res, 200, await publicFeishuApps());
+    }
+
+    // —— 中转网关 ——
+    if (path === '/api/gateway/logs' && req.method === 'GET') {
+      const q = (url.searchParams.get('q') ?? '').toLowerCase();
+      const list = (await listLogs()).filter(
+        (l) => !q || l.model.toLowerCase().includes(q) || l.providerId.toLowerCase().includes(q) || l.status.includes(q),
+      );
+      return json(res, 200, list);
+    }
+    if (path === '/api/gateway/key' && req.method === 'PUT') {
+      const b = await readBody(req);
+      await saveGatewayKey(typeof b.gatewayKey === 'string' ? b.gatewayKey : undefined);
+      return json(res, 200, { ok: true });
+    }
+    let glm: RegExpMatchArray | null;
+    if ((glm = path.match(/^\/api\/gateway\/logs\/([^/]+)$/))) {
+      const id = decodeURIComponent(glm[1]);
+      if (req.method === 'GET') {
+        const l = await getLog(id);
+        return l ? json(res, 200, l) : json(res, 404, { error: '不存在' });
+      }
+      if (req.method === 'DELETE') {
+        await removeLog(id);
+        return json(res, 200, { ok: true });
+      }
     }
 
     // —— 预置提示词 ——

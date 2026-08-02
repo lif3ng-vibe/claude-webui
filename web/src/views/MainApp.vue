@@ -7,6 +7,7 @@ import SessionsView from '../components/SessionsView.vue';
 import ChatView from '../components/ChatView.vue';
 import ProviderSettings from '../components/ProviderSettings.vue';
 import FeishuSettings from '../components/FeishuSettings.vue';
+import GatewayLog from '../components/GatewayLog.vue';
 import ServicePage from '../views/ServicePage.vue';
 import { isDesktop } from '../lib/desktop';
 import { openWindow } from '../lib/openWindow';
@@ -29,6 +30,7 @@ const modelInfo = computed(() => {
       <button :class="{ active: ui.view === 'sessions' }" @click="ui.setView('sessions')">Sessions</button>
       <button :class="{ active: ui.view === 'chat' }" @click="ui.setView('chat')">Chat</button>
       <button v-if="isDesktop" :class="{ active: ui.view === 'service' }" @click="ui.setView('service')">服务</button>
+      <button :class="{ active: ui.view === 'gateway' }" @click="ui.setView('gateway')">中转</button>
       <span class="model-info">{{ modelInfo }}</span>
       <button v-if="isDesktop && ui.view === 'service'" class="icon-btn-sm" title="新窗口打开" @click="openWindow('/service')">↗</button>
       <button class="settings-btn" title="Provider 设置" @click="settingsOpen = true">⚙</button>
@@ -37,6 +39,7 @@ const modelInfo = computed(() => {
       <SessionsView v-show="ui.view === 'sessions'" />
       <ChatView v-show="ui.view === 'chat'" />
       <ServicePage v-show="ui.view === 'service'" />
+      <GatewayLog v-show="ui.view === 'gateway'" />
     </div>
   </div>
   <NModal v-model:show="settingsOpen" :mask-closable="true">
