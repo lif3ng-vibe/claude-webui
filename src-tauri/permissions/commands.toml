@@ -1,0 +1,58 @@
+# 应用自定义命令权限：授权桌面壳 bridge 调用这些命令。
+# Tauri 2 对 remote origin（sidecar 的 http://localhost:<port>）的自定义命令强制 ACL，
+# 必须在此显式定义并在 capabilities/default.json 引用，否则 prod 下 bridge 调用被拒。
+
+[[permission]]
+identifier = "allow-desktop-open-window"
+description = "允许打开新窗口（desktop_open_window）。"
+commands.allow = ["desktop_open_window"]
+
+[[permission]]
+identifier = "allow-desktop-minimize"
+description = "允许最小化（desktop_minimize）。"
+commands.allow = ["desktop_minimize"]
+
+[[permission]]
+identifier = "allow-desktop-toggle-maximize"
+description = "允许最大化切换（desktop_toggle_maximize）。"
+commands.allow = ["desktop_toggle_maximize"]
+
+[[permission]]
+identifier = "allow-desktop-close"
+description = "允许关闭窗口（desktop_close）。"
+commands.allow = ["desktop_close"]
+
+[[permission]]
+identifier = "allow-desktop-set-always-on-top"
+description = "允许设置置顶（desktop_set_always_on_top）。"
+commands.allow = ["desktop_set_always_on_top"]
+
+[[permission]]
+identifier = "allow-desktop-is-always-on-top"
+description = "允许查询置顶状态（desktop_is_always_on_top）。"
+commands.allow = ["desktop_is_always_on_top"]
+
+[[permission]]
+identifier = "allow-service-status"
+description = "允许查询后端状态（service_status）。"
+commands.allow = ["service_status"]
+
+[[permission]]
+identifier = "allow-service-start"
+description = "允许启动后端（service_start）。"
+commands.allow = ["service_start"]
+
+[[permission]]
+identifier = "allow-service-stop"
+description = "允许停止后端（service_stop）。"
+commands.allow = ["service_stop"]
+
+[[permission]]
+identifier = "allow-service-restart"
+description = "允许重启后端（service_restart）。"
+commands.allow = ["service_restart"]
+
+[[permission]]
+identifier = "allow-service-get-logs"
+description = "允许读取后端日志（service_get_logs）。"
+commands.allow = ["service_get_logs"]
