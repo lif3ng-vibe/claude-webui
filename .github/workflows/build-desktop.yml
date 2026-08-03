@@ -1,12 +1,10 @@
 name: build-desktop
 
-# 打 tag v* 自动构建 Win+Mac 安装包并建 Release；平时可手动 workflow_dispatch 触发（产物作为 artifact 下载，不建 Release）。
+# 暂禁用 tag 自动触发（GitHub runner 排不到）；需要时手动 workflow_dispatch 触发（产物作为 artifact 下载）。
 # per-OS + per-arch 矩阵各自原生出包：windows x64、mac arm64(macos-latest)、mac x64(macos-13)。
 # 用 per-arch 而非 universal：node-pty 是原生模块，per-arch runner 的 npm ci 自动拿本机 arch 预编译，无需跨 arch 抓取。
 # 全部未签名（无证书）：mac 首次打开需右键 → 打开（Gatekeeper 警告），Win 弹 SmartScreen。
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
