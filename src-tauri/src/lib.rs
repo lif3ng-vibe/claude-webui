@@ -51,13 +51,13 @@ async fn url_for_route(state: &AppState, path: &str) -> Result<String, String> {
     }
 }
 
-fn create_window(app: AppHandle, state: AppState, path: String) -> Result<(), String> {
+async fn create_window(app: AppHandle, state: AppState, path: String) -> Result<(), String> {
     let label = label_for_route(&path);
     if let Some(w) = app.get_webview_window(&label) {
         w.set_focus().ok();
         return Ok(());
     }
-    let url_str = tauri::async_runtime::block_on(url_for_route(&state, &path))?;
+    let url_str = url_for_route(&state, &path).await?;
     let url: tauri::Url = url_str.parse().map_err(|e: url::ParseError| e.to_string())?;
     let saved = window_state::load(&path);
 
@@ -96,7 +96,7 @@ fn create_window(app: AppHandle, state: AppState, path: String) -> Result<(), St
 
 #[tauri::command]
 async fn desktop_open_window(path: String, state: tauri::State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    create_window(app, state.inner().clone(), path)
+    create_window(app, state.inner().clone(), path).await
 }
 
 #[tauri::command]
@@ -172,7 +172,10 @@ fn build_tray(app: &AppHandle) -> Result<(), String> {
                     let _ = w.set_focus();
                 } else {
                     let state = app.state::<AppState>().inner().clone();
-                    let _ = create_window(app.clone(), state, "/".into());
+                    let app3 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = create_window(app3, state, "/".into()).await;
+                    });
                 }
             }
             "restart" => {
@@ -232,7 +235,7 @@ pub fn run() {
                 if let Err(e) = state2.start(app2.clone()).await {
                     log::error!("sidecar 启动失败: {e}");
                 }
-                if let Err(e) = create_window(app2, state2, "/".into()) {
+                if let Err(e) = create_window(app2, state2, "/".into()).await {
                     log::error!("主窗口创建失败: {e}");
                 }
             });

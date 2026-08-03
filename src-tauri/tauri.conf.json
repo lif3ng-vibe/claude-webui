@@ -16,9 +16,6 @@
       "csp": null
     }
   },
-  "plugins": {
-    "single-instance": { "deepLink": false }
-  },
   "bundle": {
     "active": true,
     "targets": "all",
