@@ -108,7 +108,7 @@ if (desktop) {
 </template>
 
 <style scoped>
-.service-page { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; overflow: hidden; }
+.service-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; overflow: hidden; }
 .empty { color: #666; font-size: 13px; }
 .status-card { background: #1d1d1d; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; }
 .status-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }

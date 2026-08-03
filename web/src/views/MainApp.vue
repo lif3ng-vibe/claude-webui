@@ -35,7 +35,7 @@ const modelInfo = computed(() => {
       <button v-if="isDesktop && ui.view === 'service'" class="icon-btn-sm" title="新窗口打开" @click="openWindow('/service')">↗</button>
       <button class="settings-btn" title="Provider 设置" @click="settingsOpen = true">⚙</button>
     </div>
-    <div class="flex-1 min-h-0">
+    <div class="flex-1 min-h-0 flex flex-col">
       <SessionsView v-show="ui.view === 'sessions'" />
       <ChatView v-show="ui.view === 'chat'" />
       <ServicePage v-show="ui.view === 'service'" />
