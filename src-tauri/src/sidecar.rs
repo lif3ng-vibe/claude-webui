@@ -133,6 +133,22 @@ fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
 
+/// 剥掉 Windows verbatim 路径前缀 `\\?\`（及 `\\?\UNC\`）。
+/// Tauri 的 resource_dir() 在 Windows 可能返回带 `\\?\` 的路径；原样当 node 脚本路径传过去，
+/// node 的模块加载器不认、报 MODULE_NOT_FOUND（见 desktop.log 排查记录）。安装路径短，剥掉安全。
+fn strip_verbatim(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        if let Some(unc) = rest.strip_prefix(r"UNC\") {
+            PathBuf::from(format!(r"\\{}", unc))
+        } else {
+            PathBuf::from(rest)
+        }
+    } else {
+        p
+    }
+}
+
 async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
     let node = nodedl::resolve_node().await?;
     log::info!("resolved node: {} (exists={})", node.display(), node.exists());
@@ -150,7 +166,8 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
         c.env("CLAUDE_WEBUI_DEV", "1");
         c
     } else {
-        let res = app.path().resource_dir().map_err(|e| e.to_string())?;
+        let res_raw = app.path().resource_dir().map_err(|e| e.to_string())?;
+        let res = strip_verbatim(res_raw);
         let server = res.join("dist-server").join("server.js");
         let web_dir = res.join("web");
         log::info!(
@@ -185,7 +202,22 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 
-    // 握手：先读 stdout 首个 CLAUDE_WEBUI_PORT=<n>（15s 超时），拿到端口后再起 drain 任务。
+    // stderr drain 立即启动：即便握手失败（server 启动即崩），也能把崩溃栈写进 desktop.log。
+    let state_for_err = state.clone();
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        loop {
+            let mut line = String::new();
+            let n = reader.read_line(&mut line).await.unwrap_or(0);
+            if n == 0 { break; }
+            let trimmed = line.trim_end();
+            if !trimmed.is_empty() {
+                state_for_err.append_log("error", trimmed.to_string()).await;
+            }
+        }
+    });
+
+    // 握手：先读 stdout 首个 CLAUDE_WEBUI_PORT=<n>（15s 超时），拿到端口后再起 stdout drain。
     let state_for_handshake = state.clone();
     let mut reader = BufReader::new(stdout);
     let mut got_port: Option<u16> = None;
@@ -237,21 +269,6 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
             let trimmed = line.trim_end();
             if !trimmed.is_empty() {
                 state_for_drain.append_log("log", trimmed.to_string()).await;
-            }
-        }
-    });
-
-    // stderr drain。
-    let state_for_err = state.clone();
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap_or(0);
-            if n == 0 { break; }
-            let trimmed = line.trim_end();
-            if !trimmed.is_empty() {
-                state_for_err.append_log("error", trimmed.to_string()).await;
             }
         }
     });
