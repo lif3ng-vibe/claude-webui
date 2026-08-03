@@ -19,6 +19,8 @@ export interface GatewayLog {
   elapsedMs: number;
   status: 'ok' | 'error';
   error?: string;
+  /** true = 测试按钮产生的记录（区分正常中转）。 */
+  test?: boolean;
 }
 
 const dir = (): string => join(configDir(), 'gateway');

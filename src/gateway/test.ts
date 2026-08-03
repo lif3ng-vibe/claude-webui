@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { loadConfig } from '../config.js';
 import { openaiReqToAnthropic, openaiRespToAnthropic } from './convert.js';
+import { saveLog } from './recorder.js';
 
 export interface TestResult {
   ok: boolean;
@@ -45,14 +47,20 @@ export async function testProvider(providerId?: string, prompt = '请回复 OK')
 
     const up = await fetch(upstreamUrl, { method: 'POST', headers, body: upstreamBody });
     const text = await up.text();
-    if (!up.ok) return { ok: false, elapsedMs: Date.now() - startedAt, error: `upstream ${up.status}: ${text.slice(0, 300)}` };
+    if (!up.ok) {
+      const elapsedMs = Date.now() - startedAt;
+      await saveLog({ id: randomUUID(), createdAt: startedAt, providerId: p.id, model: p.model, stream: false, request: anthropicReq, elapsedMs, status: 'error', error: `upstream ${up.status}: ${text.slice(0, 300)}`, test: true }).catch(() => {});
+      return { ok: false, elapsedMs, error: `upstream ${up.status}: ${text.slice(0, 300)}` };
+    }
 
     const j = JSON.parse(text);
     const resp = type === 'openai' ? openaiRespToAnthropic(j) : j;
     const content = Array.isArray(resp.content)
       ? (resp.content as Array<Record<string, unknown>>).filter((b) => b.type === 'text').map((b) => String(b.text ?? '')).join('')
       : '';
-    return { ok: true, model: String(resp.model ?? p.model), content, elapsedMs: Date.now() - startedAt, usage: resp.usage };
+    const elapsedMs = Date.now() - startedAt;
+    await saveLog({ id: randomUUID(), createdAt: startedAt, providerId: p.id, model: p.model, stream: false, request: anthropicReq, response: resp, elapsedMs, status: 'ok', test: true }).catch(() => {});
+    return { ok: true, model: String(resp.model ?? p.model), content, elapsedMs, usage: resp.usage };
   } catch (e) {
     return { ok: false, elapsedMs: Date.now() - startedAt, error: String((e as Error)?.message ?? e) };
   }

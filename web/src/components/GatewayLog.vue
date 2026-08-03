@@ -75,6 +75,7 @@ function fmtTime(ms: number): string {
     <div class="flex-1 min-h-0 overflow-auto">
       <div v-for="l in filtered" :key="l.id" class="row" :class="{ sel: selected?.id === l.id }" @click="selected = selected?.id === l.id ? null : l">
         <span class="t">{{ fmtTime(l.createdAt) }}</span>
+        <NTag v-if="l.test" size="small" type="info">测试</NTag>
         <span class="m">{{ l.model }}</span>
         <span class="p">{{ l.providerId }}</span>
         <span class="d">{{ (l.elapsedMs / 1000).toFixed(1) }}s</span>

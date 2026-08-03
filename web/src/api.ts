@@ -86,6 +86,7 @@ export interface GatewayLog {
   elapsedMs: number;
   status: 'ok' | 'error';
   error?: string;
+  test?: boolean;
 }
 
 export interface ConfigResponse {
