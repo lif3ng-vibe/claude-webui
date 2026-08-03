@@ -58,9 +58,11 @@ export function createTerminalHandler(reader: ClaudeFileReader, lockSet: Set<str
       pty = isWin
         ? nodePty.spawn(process.env.ComSpec || 'cmd.exe', ['/c', 'claude', ...args], {
             cwd, cols: 80, rows: 24, name: 'xterm-color',
+            env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' },
           })
         : nodePty.spawn('claude', args, {
             cwd, cols: 80, rows: 24, name: 'xterm-color',
+            env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' },
           });
     } catch (e) {
       ws.send(JSON.stringify({ type: 'error', msg: `启动 claude 失败：${String(e)}` }));

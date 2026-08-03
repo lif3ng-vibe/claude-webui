@@ -131,6 +131,7 @@ export class ClaudeRunner {
       cwd: req.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
+      env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' },
     });
     if (child.stdin) {
       child.stdin.write(req.prompt);
@@ -150,6 +151,7 @@ export class ClaudeRunner {
       cwd: req.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
+      env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' },
     });
     if (child.stdin) {
       child.stdin.write(req.prompt);
