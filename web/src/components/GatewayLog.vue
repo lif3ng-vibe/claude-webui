@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { NInput, NButton, NTag, useMessage } from 'naive-ui';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { api, deleteGatewayLog, saveGatewayKey, gatewayTest, type GatewayLog, type ConfigResponse } from '../api';
@@ -30,13 +30,24 @@ async function saveKey(): Promise<void> {
     msg.error(String(e));
   }
 }
+const selectedProviderId = ref('');
+watch(
+  configQuery.data,
+  (c: ConfigResponse | undefined) => {
+    if (c && !selectedProviderId.value) selectedProviderId.value = c.activeProviderId;
+  },
+  { immediate: true },
+);
+const providerOptions = computed(() =>
+  (configQuery.data.value?.providers ?? []).map((p) => ({ label: `${p.name || p.id}${p.isEnv ? ' · 内置' : ''}`, value: p.id })),
+);
 const testResult = ref<{ ok: boolean; content?: string; error?: string; model?: string; elapsedMs?: number } | null>(null);
 const testing = ref(false);
 async function runTest(): Promise<void> {
   testing.value = true;
   testResult.value = null;
   try {
-    testResult.value = await gatewayTest();
+    testResult.value = await gatewayTest(selectedProviderId.value || undefined);
   } catch (e) {
     testResult.value = { ok: false, error: String(e) };
   } finally {
@@ -64,7 +75,8 @@ function fmtTime(ms: number): string {
       <NInput v-model:value="q" size="small" placeholder="过滤 model / provider / status" class="flex-1" />
       <NInput v-model:value="gwKey" size="small" :placeholder="hasKey ? '网关 key 已设（留空不改）' : '设置网关 key（留空=不校验）'" style="width: 260px" />
       <NButton size="small" @click="saveKey">保存 key</NButton>
-      <NButton size="small" :loading="testing" @click="runTest">测试中转</NButton>
+      <NSelect v-model:value="selectedProviderId" :options="providerOptions" size="small" style="width: 200px" placeholder="选择 provider" />
+      <NButton size="small" :loading="testing" @click="runTest">测试</NButton>
     </div>
     <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'err'">
       <b>{{ testResult.ok ? '✓ 测试通过' : '✗ 测试失败' }}</b>

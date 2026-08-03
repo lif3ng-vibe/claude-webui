@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { loadConfig } from '../config.js';
+import { loadConfig, resolveProvider } from '../config.js';
 import { openaiReqToAnthropic, openaiRespToAnthropic } from './convert.js';
 import { saveLog } from './recorder.js';
 
@@ -21,14 +21,16 @@ export async function testProvider(providerId?: string, prompt = '请回复 OK')
   try {
     const c = await loadConfig();
     const providers = c.providers ?? [];
-    const p =
-      (providerId ? providers.find((x) => x.id === providerId) : undefined) ??
-      providers.find((x) => x.id === c.activeProviderId) ??
-      providers[0];
-    if (!p || !p.baseURL || (!p.apiKey && !p.authToken)) {
-      return { ok: false, elapsedMs: 0, error: '未配置可用 provider（需 baseURL + key）' };
+    const pid = providerId ?? c.activeProviderId ?? providers[0]?.id;
+    if (!pid) return { ok: false, elapsedMs: 0, error: '未配置 provider' };
+    const configured = pid === 'env' ? null : providers.find((x) => x.id === pid);
+    if (!configured && pid !== 'env') return { ok: false, elapsedMs: 0, error: `provider ${pid} 不存在` };
+    const cfg = await resolveProvider(pid);
+    if (!cfg.baseURL || (!cfg.apiKey && !cfg.authToken)) {
+      return { ok: false, elapsedMs: 0, error: 'provider 未配置 baseURL/key' };
     }
-    const type = p.type === 'openai' ? 'openai' : 'anthropic';
+    const type = configured?.type === 'openai' ? 'openai' : 'anthropic';
+    const p = { id: pid, type, baseURL: cfg.baseURL, apiKey: cfg.apiKey, authToken: cfg.authToken, model: configured?.model ?? cfg.defaultModel };
     const anthropicReq = { model: p.model, max_tokens: 100, messages: [{ role: 'user', content: prompt }] };
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     let upstreamUrl: string;
