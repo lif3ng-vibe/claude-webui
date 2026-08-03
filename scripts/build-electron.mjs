@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureElectronPkg } from './ensureElectronPkg.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -16,4 +17,6 @@ function run(cmd, args) {
 await run('npm', ['run', 'build:web']);
 await run('npm', ['run', 'build:server']);
 await run('npx', ['tsc', '-p', 'electron/tsconfig.json']);
+// tsc 产出 CJS，根 package.json type:module 会误判为 ESM，须放嵌套 package.json 标记 commonjs。
+ensureElectronPkg(root);
 await run('npx', ['electron-builder', '--dir']);

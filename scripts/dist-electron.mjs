@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureElectronPkg } from './ensureElectronPkg.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -16,6 +17,8 @@ function run(cmd, args) {
 await run('npm', ['run', 'build:web']);
 await run('npm', ['run', 'build:server']);
 await run('npx', ['tsc', '-p', 'electron/tsconfig.json']);
+// tsc 产出 CJS，根 package.json type:module 会误判为 ESM，须放嵌套 package.json 标记 commonjs（否则打出来的安装包打不开）。
+ensureElectronPkg(root);
 // --publish never：仅本地产出，不推任何发布渠道。
 // mac 按 arch 出 dmg（CI 传 BUILD_ARCH=arm64|x64，对应 --arm64|--x64）；win 出 nsis exe，无 arch。
 const arch = process.env.BUILD_ARCH;

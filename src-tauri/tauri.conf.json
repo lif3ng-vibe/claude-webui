@@ -27,9 +27,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../dist-server",
-      "../web/dist",
-      "../node_modules/node-pty"
+      { "src": "../dist-server", "target": "dist-server/" },
+      { "src": "../web/dist", "target": "web/dist/" },
+      { "src": "../node_modules/node-pty", "target": "node_modules/node-pty/" }
     ]
   }
 }

@@ -196,6 +196,7 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 ### 10.3 待办 / 风险
 - 完整 dev/prod 运行时验证（dev:electron 三终端、dev:tauri、各自 prod 产物、托盘、单实例、按需下载）需桌面机实测。
 - Tauri prod 把 `dist-server`/`web/dist` 作 `bundle.resources`，sidecar 从 `resource_dir` 读；Electron prod 把它们打进 `files`。
+- **Electron 主进程 CJS/ESM（坑，曾导致安装包打不开）**：根 `package.json` 有 `"type":"module"`，而 `electron/tsconfig.json` 编译 `module:CommonJS`，产物 `dist-electron/{main,preload}.js` 是 CJS（开头即 `exports`/`require`）。Node 按最近祖先 `package.json` 的 `type` 判定模块类型——根的 `module` 会让 `.js` 被当 ESM，运行报 `exports is not defined in ES module scope`，app 直接打不开。解法：在 `dist-electron/` 放一个 `{"type":"commonjs"}` 覆盖。**三处构建脚本（`dev-electron`/`build-electron`/`dist-electron`）tsc 之后都必须写这个文件**（`scripts/ensureElectronPkg.mjs` 统一提供）——只改 dev 路径、漏掉打包路径，CI 出来的包照样打不开（此坑已踩）。
 - 安装包/签名未做（`electron-builder --dir` + `tauri build` 仅出 unpacked/产物）。
 - dev 下 Electron sidecar 固定 3000，勿与 web 流程的 3000 同时占用。
 
@@ -214,8 +215,10 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。
 - **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。
 - **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。前端 xterm 拦截 Ctrl+C（有选中则复制剪贴板，无选中放行中断）+ Ctrl/Cmd+V（粘贴剪贴板到 pty）。
-- **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，**预编译按平台且随 npm 包自带所有平台**（`prebuilds/{darwin-arm64,darwin-x64,win32-*}`），按需下载的 Node 22 直接兼容，无需匹配 Node ABI、无需跨 arch 抓取。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources`，sidecar prod env 设 `NODE_PATH=<resource_dir>[:<resource_dir>/node_modules]` 让 bundle 的 `require('node-pty')` 解析。
-- **风险/待办**：完整 dev/prod 终端在桌面安装包里跑通需实测（node-pty 预编译随包、Tauri `NODE_PATH` 解析）；spawn claude 显式设 `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`（防继承 `CLAUDE_CODE_CHILD_SESSION` 导致不写 transcript、Sessions 视图看不到新对话）。CI mac x64 已改 macos-latest 交叉编（不再排 macos-13）。
+- **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，**预编译按平台且随 npm 包自带所有平台**（`prebuilds/{darwin-arm64,darwin-x64,win32-*}`），按需下载的 Node 22 直接兼容，无需匹配 Node ABI、无需跨 arch 抓取。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources` 随包，sidecar（ESM bundle）的 `import 'node-pty'` 经**标准 node_modules 向上查找**解析（`<resource_dir>/dist-server/server.js` → `<resource_dir>/node_modules/node-pty`）。⚠️ ESM 的 `import` **不读 `NODE_PATH`**（那是 CJS `require` 专属），sidecar 里设的 `NODE_PATH` 实际不参与解析、只是冗余保留——真正起作用的是平铺的资源布局。
+- **资源平铺（坑，曾导致安装后主窗口不显示）**：`tauri.conf.json` 的 `bundle.resources` 若用带 `../` 的字符串路径（如 `"../dist-server"`），Tauri 会把 `..` 编码成字面子目录 `_up_/`，运行时 `resource_dir().join("dist-server")` 就找不到 server.js → sidecar 拿不到端口 → **主窗口从不创建**（且 `windows_subsystem="windows"` 下日志不可见，表现为静默无窗口）。修法：改用 `{ "src": "../dist-server", "target": "dist-server/" }` 对象形式显式指定 target，资源平铺到 `resource_dir` 下、无 `_up_`。
+- **ESM bundle 的 CJS 全局（坑，同上）**：`build-server.mjs` 产出 `format:'esm'` 单文件，被内联的 CJS 依赖（如 `@larksuiteoapi/node-sdk` 的 `getSdkVersion` 读 `__dirname`）会因 ESM 作用域无 `__dirname/__filename` 而 `ReferenceError` 崩溃，同样卡住握手。banner 必须从 `import.meta.url` 重建 `__filename/__dirname`（`require` 走 `createRequire`），server 才能起。
+- **风险/待办**：spawn claude 显式设 `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`（防继承 `CLAUDE_CODE_CHILD_SESSION` 导致不写 transcript、Sessions 视图看不到新对话）。CI mac x64 已改 macos-latest 交叉编（不再排 macos-13）。
 
 ## 12. 飞书机器人（远程续接 session + 完成通知）
 

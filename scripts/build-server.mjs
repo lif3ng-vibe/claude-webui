@@ -23,9 +23,18 @@ const result = await build({
   // node-pty 是原生模块（N-API 预编译），不能打进单文件 bundle；external 后运行时从 node_modules 解析。
   // ws 是纯 JS，仍打进。
   external: ['node-pty'],
-  // banner 注入 createRequire：防御 CJS 依赖（如 @anthropic-ai/sdk 的可选动态 require）在 ESM bundle 里需要 require。
+  // banner 注入 CJS 全局：ESM bundle 里被内联的 CJS 依赖会引用 require / __dirname / __filename，
+  // 但 ESM 作用域这三个都不存在（require→createRequire；__dirname/__filename→从 import.meta.url 重建）。
+  // 不补的话运行时 ReferenceError，例如 @larksuiteoapi/node-sdk 的 getSdkVersion 直接读 __dirname。
   banner: {
-    js: "import { createRequire as __createRequire } from 'module';\nconst require = __createRequire(import.meta.url);",
+    js: [
+      "import { createRequire as __createRequire } from 'module';",
+      "import { fileURLToPath as __fileURLToPath } from 'url';",
+      "import { dirname as __dirnameOf } from 'path';",
+      "const require = __createRequire(import.meta.url);",
+      "const __filename = __fileURLToPath(import.meta.url);",
+      "const __dirname = __dirnameOf(__filename);",
+    ].join('\n'),
   },
   // 防御：若将来出现 .node 原生模块，按文件拷贝而非内联。
   loader: { '.node': 'file' },
