@@ -7,6 +7,8 @@ import { NInput, NSpin, NCheckbox, NPopover, NSelect, useMessage } from 'naive-u
 import { api, type SessionMessage } from '../api';
 import { useDisplayStore } from '../stores/display';
 import { renderContent, renderTool, renderMd, esc } from '../lib/render';
+import Icon from '../components/Icon.vue';
+import { iconSvg } from '../lib/icons';
 import { readSSE, type SSEEvent } from '../lib/sse';
 import { setTitle } from '../lib/head';
 import { broadcastInvalidate } from '../lib/broadcast';
@@ -256,9 +258,9 @@ async function studyStream(steps: unknown[], question: string): Promise<void> {
       else if (ev.event === 'request') b.requests.push(JSON.stringify(ev.data?.request, null, 2));
       else if (ev.event === 'thinking') b.thinking += ev.data?.text ?? '';
       else if (ev.event === 'tool_use' && display.showToolUse)
-        b.tools.push({ id: toolId++, html: `<div class="tool-call">🔧 ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
+        b.tools.push({ id: toolId++, html: `<div class="tool-call">${iconSvg('wrench', 13)} ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
       else if (ev.event === 'tool_result' && display.showToolResult)
-        b.tools.push({ id: toolId++, html: `<div class="tool-result">↳ ${esc(ev.data?.name)}: ${esc(String(ev.data?.result ?? '')).slice(0, 300)}</div>` });
+        b.tools.push({ id: toolId++, html: `<div class="tool-result">${iconSvg('corner-down-right', 13)} ${esc(ev.data?.name)}: ${esc(String(ev.data?.result ?? '')).slice(0, 300)}</div>` });
       else if (ev.event === 'text') b.bodyText += ev.data?.text ?? '';
       else if (ev.event === 'error') b.bodyText += `\n[error] ${ev.data?.error ?? ''}`;
       scrollTick.value++;
@@ -365,9 +367,9 @@ function refresh(): void {
           </div>
         </div>
       </NPopover>
-      <button class="ask" title="复制 resume 命令" @click="copyResume">📋</button>
-      <button class="ask" title="在终端中打开（交互式 resume）" @click="popTerminal">🖥</button>
-      <button class="ask popout" title="新窗口打开该 session" @click="popCurrent">↗</button>
+      <button class="ask" title="复制 resume 命令" @click="copyResume"><Icon name="copy" :size="13" /></button>
+      <button class="ask" title="在终端中打开（交互式 resume）" @click="popTerminal"><Icon name="terminal" :size="13" /></button>
+      <button class="ask popout" title="新窗口打开该 session" @click="popCurrent"><Icon name="arrow-up-right" :size="13" /></button>
       <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
       <button v-if="selectedMsgs.size" class="ask" @click="clearSelection()">取消选中</button>
       <button class="ask" @click="refresh()">刷新</button>
@@ -390,19 +392,19 @@ function refresh(): void {
               <input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />
               <span class="role">{{ msgRole(m) }}</span>
               <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
-              <button class="ask" @click="askStep(m)">🔍问</button>
+              <button class="ask" @click="askStep(m)"><Icon name="search" :size="12" />问</button>
             </div>
             <div class="body" v-html="renderContent(m.message?.content, msgQ, renderOpts)" />
           </template>
           <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
-            <div class="role"><input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
+            <div class="role"><input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)"><Icon name="search" :size="12" />问</button></div>
             <div class="body" v-html="renderTool(m.toolUseResult, m.raw, msgQ)" />
           </template>
         </div>
       </template>
       <div v-for="l in live" :key="l.id" v-html="l.html"></div>
       <div v-for="b in studyBlocks" :key="'s' + b.id" class="msg study live">
-        <div class="role">🔍 深问</div>
+        <div class="role"><Icon name="search" :size="12" /> 深问</div>
         <div class="study-q">{{ b.question }}</div>
         <div v-if="b.thinking && display.showThinking" class="thinking">{{ b.thinking }}</div>
         <template v-for="t in b.tools" :key="t.id"><div v-html="t.html"></div></template>
@@ -425,7 +427,7 @@ function refresh(): void {
       <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt">发送</button>
       <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
     </div>
-    <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()">↑</button>
+    <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()"><Icon name="arrow-up" :size="18" /></button>
     <div
       v-if="dragRect"
       class="drag-rect"

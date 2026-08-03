@@ -7,6 +7,7 @@ import { NInput, NSpin, NEmpty, NSelect, NPopover, NCheckbox, useMessage } from 
 import { api, type SessionEntry } from '../api';
 import { useDisplayStore } from '../stores/display';
 import { hl, fmtBytes, fmtTime } from '../lib/render';
+import Icon from '../components/Icon.vue';
 import { setTitle } from '../lib/head';
 import { openWindow } from '../lib/openWindow';
 
@@ -121,8 +122,8 @@ function copyResume(s: SessionEntry): void {
       <div v-for="s in filtered" :key="s.sessionId" class="item session" @click="openSession(s)">
         <div class="sess-head">
           <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
-          <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(s)">📋</button>
-          <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(s)">↗</button>
+          <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(s)"><Icon name="copy" :size="14" /></button>
+          <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(s)"><Icon name="arrow-up-right" :size="14" /></button>
         </div>
         <div v-if="runningMap.has(s.sessionId)" class="run-badge" :class="runningMap.get(s.sessionId)"><span class="run-dot"></span>{{ runLabel(runningMap.get(s.sessionId)) }}</div>
         <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>

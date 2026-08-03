@@ -8,6 +8,7 @@ import { readSSE } from '../lib/sse';
 import { useConfig } from '../composables/useConfig';
 import { openWindow } from '../lib/openWindow';
 import { broadcastInvalidate } from '../lib/broadcast';
+import Icon from './Icon.vue';
 
 const promptsQuery = useQuery({ queryKey: ['prompts'], queryFn: api.prompts });
 const prompts = computed(() => promptsQuery.data.value ?? []);
@@ -168,15 +169,15 @@ async function sendChat(): Promise<void> {
       <textarea v-model="systemPrompt" class="sys-prompt" placeholder="选择上方预设或自行编辑系统提示词…"></textarea>
       <div class="preset-hint">预置提示词存于 ~/.claude-webui/prompts.json</div>
       <div class="conv-head">
-        <span class="text-[12px] text-[#888] cursor-pointer" @click="showHistory = !showHistory">{{ showHistory ? '▾' : '▸' }} 对话历史</span>
+        <span class="text-[12px] text-[#888] cursor-pointer inline-flex items-center gap-1" @click="showHistory = !showHistory"><Icon name="chevron-down" :size="12" :style="{ transform: showHistory ? 'none' : 'rotate(-90deg)', transition: 'transform .15s ease' }" /> 对话历史</span>
         <button class="ask" @click="newChat">+ 新对话</button>
       </div>
       <div v-show="showHistory" class="conv-list">
         <div v-for="c in conversations" :key="c.id" class="conv-item" :class="{ active: c.id === conversationId }" @click="loadConv(c)">
           <div class="conv-title">{{ c.title }}<span class="conv-kind">{{ c.kind === 'study' ? '深问' : '聊天' }}</span></div>
           <div class="conv-meta">{{ new Date(c.updatedAt).toLocaleString() }}</div>
-          <button class="conv-del popout" title="新窗口打开" @click.stop="popConversation(c)">↗</button>
-          <button class="conv-del" @click.stop="delConv(c)">🗑</button>
+          <button class="conv-del popout" title="新窗口打开" @click.stop="popConversation(c)"><Icon name="arrow-up-right" :size="13" /></button>
+          <button class="conv-del" @click.stop="delConv(c)"><Icon name="trash" :size="13" /></button>
         </div>
       </div>
     </aside>
@@ -184,7 +185,7 @@ async function sendChat(): Promise<void> {
     <main class="min-h-0 flex flex-col overflow-hidden">
       <div class="px-4 pt-3 pb-1 flex items-center gap-2">
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ conversations.find((x) => x.id === conversationId)?.title || '新对话' }}</div>
-        <button v-if="conversationId" class="ask" title="新窗口打开该对话" @click="popConversation({ id: conversationId } as ConversationSummary)">↗</button>
+        <button v-if="conversationId" class="ask" title="新窗口打开该对话" @click="popConversation({ id: conversationId } as ConversationSummary)"><Icon name="arrow-up-right" :size="13" /></button>
       </div>
       <div ref="chatTimelineRef" class="flex-1 min-h-0 overflow-auto px-4 py-3">
         <div v-if="!chatMsgs.length" class="empty">发一条消息开始对话…</div>

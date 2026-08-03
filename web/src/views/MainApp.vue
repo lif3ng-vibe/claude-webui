@@ -4,6 +4,7 @@ import { NModal } from 'naive-ui';
 import { useUiStore } from '../stores/ui';
 import { useConfig } from '../composables/useConfig';
 import SessionsView from '../components/SessionsView.vue';
+import Icon from '../components/Icon.vue';
 import ChatView from '../components/ChatView.vue';
 import ProviderSettings from '../components/ProviderSettings.vue';
 import FeishuSettings from '../components/FeishuSettings.vue';
@@ -32,8 +33,8 @@ const modelInfo = computed(() => {
       <button v-if="isDesktop" :class="{ active: ui.view === 'service' }" @click="ui.setView('service')">服务</button>
       <button :class="{ active: ui.view === 'gateway' }" @click="ui.setView('gateway')">中转</button>
       <span class="model-info">{{ modelInfo }}</span>
-      <button v-if="isDesktop && ui.view === 'service'" class="icon-btn-sm" title="新窗口打开" @click="openWindow('/service')">↗</button>
-      <button class="settings-btn" title="Provider 设置" @click="settingsOpen = true">⚙</button>
+      <button v-if="isDesktop && ui.view === 'service'" class="icon-btn-sm" title="新窗口打开" @click="openWindow('/service')"><Icon name="arrow-up-right" :size="14" /></button>
+      <button class="settings-btn" title="Provider 设置" @click="settingsOpen = true"><Icon name="settings" :size="15" /></button>
     </div>
     <div class="flex-1 min-h-0 flex flex-col">
       <SessionsView v-show="ui.view === 'sessions'" />

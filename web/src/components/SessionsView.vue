@@ -7,6 +7,8 @@ import { useSessionStore } from '../stores/session';
 import { useDisplayStore } from '../stores/display';
 import { api, type ProjectEntry, type SessionEntry } from '../api';
 import { renderContent, renderTool, renderMd, hl, fmtBytes, fmtTime, esc } from '../lib/render';
+import Icon from './Icon.vue';
+import { iconSvg } from '../lib/icons';
 import { readSSE, type SSEEvent } from '../lib/sse';
 import { openWindow } from '../lib/openWindow';
 import { broadcastInvalidate } from '../lib/broadcast';
@@ -291,6 +293,7 @@ function onTimelineMouseDown(e: MouseEvent): void {
   if (e.button !== 0) return;
   const t = e.target as Element;
   if (t.closest('input,button,a,summary,pre,textarea,details')) return; // 不劫持交互元素
+  if (t.closest('.body')) return; // 消息正文：交给原生文字选中，不进入矩形框选
   dragging = true;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
@@ -354,9 +357,9 @@ async function studyStream(dir: string, sid: string, steps: unknown[], question:
       if (ev.event === 'request') b.requests.push(JSON.stringify(ev.data?.request, null, 2));
       else if (ev.event === 'thinking') b.thinking += ev.data?.text ?? '';
       else if (ev.event === 'tool_use' && display.showToolUse)
-        b.tools.push({ id: toolId++, html: `<div class="tool-call">🔧 ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
+        b.tools.push({ id: toolId++, html: `<div class="tool-call">${iconSvg('wrench', 13)} ${esc(ev.data?.toolCall?.name)}(${esc(JSON.stringify(ev.data?.toolCall?.input ?? '')).slice(1, 120)})</div>` });
       else if (ev.event === 'tool_result' && display.showToolResult)
-        b.tools.push({ id: toolId++, html: `<div class="tool-result">↳ ${esc(ev.data?.name)}: ${esc(String(ev.data?.result ?? '')).slice(0, 300)}</div>` });
+        b.tools.push({ id: toolId++, html: `<div class="tool-result">${iconSvg('corner-down-right', 13)} ${esc(ev.data?.name)}: ${esc(String(ev.data?.result ?? '')).slice(0, 300)}</div>` });
       else if (ev.event === 'text') b.bodyText += ev.data?.text ?? '';
       else if (ev.event === 'error') b.bodyText += `\n[error] ${ev.data?.error ?? ''}`;
       scrollTick.value++;
@@ -487,7 +490,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <span class="title" :title="node.p.cwd" v-html="hl(node.p.cwd, q)" />
               <span v-if="display.showDirTime" class="dir-time">{{ fmtTime(node.p.latestMtimeMs) }}</span>
               <span v-if="display.showCountBadge" class="count-badge">{{ node.p.sessionCount }}</span>
-              <button class="icon-btn-sm popout" title="新窗口打开该目录" @click.stop="popDir(node.p)">↗</button>
+              <button class="icon-btn-sm popout" title="新窗口打开该目录" @click.stop="popDir(node.p)"><Icon name="arrow-up-right" :size="14" /></button>
             </div>
             <div v-if="node.show && node.open" class="sub-tree">
               <div
@@ -499,9 +502,9 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               >
                 <div class="sess-head">
                   <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
-                  <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)">📋</button>
-                  <button class="icon-btn-sm" title="在终端中打开（交互式 resume）" @click.stop="popTerminal(node.p.dirName, s.sessionId)">🖥</button>
-                  <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(node.p.dirName, s.sessionId)">↗</button>
+                  <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)"><Icon name="copy" :size="14" /></button>
+                  <button class="icon-btn-sm" title="在终端中打开（交互式 resume）" @click.stop="popTerminal(node.p.dirName, s.sessionId)"><Icon name="terminal" :size="14" /></button>
+                  <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(node.p.dirName, s.sessionId)"><Icon name="arrow-up-right" :size="14" /></button>
                 </div>
                 <div v-if="runningMap.has(s.sessionId)" class="run-badge" :class="runningMap.get(s.sessionId)"><span class="run-dot"></span>{{ runLabel(runningMap.get(s.sessionId)) }}</div>
                 <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>
@@ -515,7 +518,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
     <main class="relative min-h-0 flex flex-col overflow-hidden">
       <div class="px-4 pt-3 pb-2 flex items-center gap-2">
         <div class="text-[12px] text-[#888] flex-1 truncate">{{ store.title || '选择左侧的工作目录' }}</div>
-        <button v-if="store.sessionId" class="ask" title="新窗口打开该 session" @click="popSession(store.dirName, store.sessionId)">↗</button>
+        <button v-if="store.sessionId" class="ask" title="新窗口打开该 session" @click="popSession(store.dirName, store.sessionId)"><Icon name="arrow-up-right" :size="13" /></button>
         <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
         <button v-if="selectedMsgs.size" class="ask" @click="clearSelection()">取消选中</button>
         <button v-if="store.sessionId" class="ask" @click="refresh()">刷新</button>
@@ -539,19 +542,19 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 <input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />
                 <span class="role">{{ msgRole(m) }}</span>
                 <span class="time">{{ m.timestamp ? new Date(m.timestamp).toLocaleString() : '' }}</span>
-                <button class="ask" @click="askStep(m)">🔍问</button>
+                <button class="ask" @click="askStep(m)"><Icon name="search" :size="12" />问</button>
               </div>
               <div class="body" v-html="renderContent(m.message?.content, msgQ, renderOpts)" />
             </template>
             <template v-else-if="m.type === 'tool_result' || m.toolUseResult">
-              <div class="role"><input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)">🔍问</button></div>
+              <div class="role"><input v-if="display.showCheckbox" type="checkbox" class="sel-cb" :checked="selectedMsgs.has(m)" @click.stop="onSelectClick($event, i)" />tool<button class="ask" @click="askStep(m)"><Icon name="search" :size="12" />问</button></div>
               <div class="body" v-html="renderTool(m.toolUseResult, m.raw, msgQ)" />
             </template>
           </div>
         </template>
         <div v-for="l in live" :key="l.id" v-html="l.html"></div>
         <div v-for="b in studyBlocks" :key="'s' + b.id" class="msg study live">
-          <div class="role">🔍 深问</div>
+          <div class="role"><Icon name="search" :size="12" /> 深问</div>
           <div class="study-q">{{ b.question }}</div>
           <div v-if="b.thinking && display.showThinking" class="thinking">{{ b.thinking }}</div>
           <template v-for="t in b.tools" :key="t.id"><div v-html="t.html"></div></template>
@@ -574,7 +577,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
         <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt">发送</button>
         <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
       </div>
-      <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()">↑</button>
+      <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()"><Icon name="arrow-up" :size="18" /></button>
     </main>
     <div
       v-if="dragRect"

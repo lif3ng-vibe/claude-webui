@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { NSelect, NSpin, useMessage } from 'naive-ui';
 import { api, saveConversation, deleteConversation, type ConvMessage, type Conversation } from '../api';
 import { renderContent } from '../lib/render';
+import Icon from '../components/Icon.vue';
 import { readSSE } from '../lib/sse';
 import { useConfig } from '../composables/useConfig';
 import { setTitle, setFavicon, FAVICON } from '../lib/head';
@@ -177,8 +178,8 @@ async function sendChat(): Promise<void> {
     <div class="px-4 pt-3 pb-2 flex items-center gap-2">
       <div class="text-[12px] text-[#888] flex-1 truncate">{{ conv?.title || '加载中…' }}</div>
       <span v-if="conv" class="text-[11px] text-[#666]">{{ conv.kind === 'study' ? '深问' : '聊天' }}</span>
-      <button v-if="conv" class="ask popout" title="新窗口打开该对话" @click="popCurrent">↗</button>
-      <button v-if="conv" class="ask" title="删除对话" @click="deleteCurrent">🗑</button>
+      <button v-if="conv" class="ask popout" title="新窗口打开该对话" @click="popCurrent"><Icon name="arrow-up-right" :size="13" /></button>
+      <button v-if="conv" class="ask" title="删除对话" @click="deleteCurrent"><Icon name="trash" :size="13" /></button>
     </div>
     <div class="px-4 pb-2 flex items-center gap-2">
       <NSelect v-model:value="selectedProviderId" :options="providerOptions" size="small" placeholder="选择 provider" class="w-56" />

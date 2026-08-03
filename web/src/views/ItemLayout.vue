@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
+import Icon from '../components/Icon.vue';
 
 // 精简单页 shell：无 Sessions/Chat 顶栏，不能切同级列表项。
 // 仅父子钻取间显示"← 返回"：判断本窗口是否从父项钻取而来
@@ -19,7 +20,7 @@ function goBack(): void {
 <template>
   <div class="h-full flex flex-col">
     <div v-if="showBack" class="item-topbar">
-      <button class="back-btn" title="返回上层" @click="goBack">← 返回</button>
+      <button class="back-btn inline-flex items-center gap-1" title="返回上层" @click="goBack"><Icon name="arrow-left" :size="14" /> 返回</button>
     </div>
     <div class="flex-1 min-h-0">
       <router-view />

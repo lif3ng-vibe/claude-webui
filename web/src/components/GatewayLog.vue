@@ -4,6 +4,7 @@ import { NInput, NButton, NSelect, NTag, useMessage } from 'naive-ui';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { api, deleteGatewayLog, saveGatewayKey, gatewayTest, type GatewayLog, type ConfigResponse } from '../api';
 import { renderContent } from '../lib/render';
+import Icon from './Icon.vue';
 
 const msg = useMessage();
 const queryClient = useQueryClient();
@@ -79,7 +80,7 @@ function fmtTime(ms: number): string {
       <NButton size="small" :loading="testing" @click="runTest">测试</NButton>
     </div>
     <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'err'">
-      <b>{{ testResult.ok ? '✓ 测试通过' : '✗ 测试失败' }}</b>
+      <b><Icon :name="testResult.ok ? 'check-circle' : 'x-circle'" :size="13" /> {{ testResult.ok ? '测试通过' : '测试失败' }}</b>
       <span v-if="testResult.model" class="meta">{{ testResult.model }} · {{ testResult.elapsedMs }}ms</span>
       <div v-if="testResult.content" class="test-content">{{ testResult.content }}</div>
       <div v-if="testResult.error" class="err-text">{{ testResult.error }}</div>
@@ -93,7 +94,7 @@ function fmtTime(ms: number): string {
         <span class="d">{{ (l.elapsedMs / 1000).toFixed(1) }}s</span>
         <span class="u">{{ l.response?.usage ? `${l.response.usage.input_tokens ?? '?'}/${l.response.usage.output_tokens ?? '?'}` : '-' }}</span>
         <NTag :type="l.status === 'ok' ? 'success' : 'error'" size="small">{{ l.status }}</NTag>
-        <button class="ask" @click.stop="del(l.id)">🗑</button>
+        <button class="ask" @click.stop="del(l.id)"><Icon name="trash" :size="13" /></button>
       </div>
       <div v-if="!filtered.length" class="empty">暂无中转记录。把工具的 base URL 指向本服务（如 http://localhost:3000），发个请求试试。</div>
     </div>

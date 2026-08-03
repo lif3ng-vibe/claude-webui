@@ -75,9 +75,9 @@ details > pre { margin: 4px 0 4px 14px; }
 .sys-prompt { width: 100%; margin-top: 6px; min-height: 180px; resize: vertical; background: #111; border: 1px solid #333; border-radius: 6px; color: #ddd; padding: 6px; font: inherit; }
 .sys-prompt:focus { outline: none; border-color: #8ab4f8; }
 .preset-hint { font-size: 11px; color: #555; margin-top: 6px; }
-.settings-btn { background: none; border: 1px solid #444; color: #888; padding: 3px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-left: 8px; }
+.settings-btn { display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid #444; color: #888; padding: 3px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-left: 8px; }
 .settings-btn:hover { color: #8ab4f8; }
-.back-top { position: absolute; right: 16px; bottom: 76px; z-index: 5; width: 34px; height: 34px; border-radius: 50%; background: #2a2a2a; color: #8ab4f8; border: 1px solid #444; cursor: pointer; font-size: 16px; line-height: 1; }
+.back-top { position: absolute; right: 16px; bottom: 76px; z-index: 5; width: 34px; height: 34px; border-radius: 50%; background: #2a2a2a; color: #8ab4f8; border: 1px solid #444; cursor: pointer; font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
 .back-top:hover { background: #3a3a3a; }
 .ds { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
 .ds-row { display: flex; align-items: center; gap: 8px; }
@@ -96,7 +96,7 @@ details > pre { margin: 4px 0 4px 14px; }
 .run-badge.busy .run-dot { animation: pulse 1.5s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .sess-head { display: flex; align-items: center; gap: 4px; }
-.icon-btn-sm { flex-shrink: 0; background: none; border: none; color: #888; cursor: pointer; padding: 2px 4px; font-size: 13px; }
+.icon-btn-sm { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; color: #888; cursor: pointer; padding: 2px 4px; font-size: 13px; }
 .icon-btn-sm:hover { color: #8ab4f8; }
 .popout { opacity: 0.45; }
 .popout:hover { opacity: 1; }
@@ -108,6 +108,6 @@ details > pre { margin: 4px 0 4px 14px; }
 .conv-title { font-size: 12px; color: #ddd; }
 .conv-meta { font-size: 11px; color: #666; }
 .conv-kind { font-size: 10px; color: #b388ff; margin-left: 6px; }
-.conv-del { position: absolute; right: 6px; top: 6px; background: none; border: none; color: #666; cursor: pointer; padding: 2px; }
+.conv-del { position: absolute; right: 6px; top: 6px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; color: #666; cursor: pointer; padding: 2px; }
 .conv-del:hover { color: #e88; }
 .conv-item { position: relative; }
