@@ -36,6 +36,18 @@ onMounted(() => {
   term.open(termEl.value);
   fit.fit();
 
+  // Ctrl+C：有选中文本则复制到剪贴板（不发 SIGINT）；无选中则放行（中断进程）。
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type === 'keydown' && ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.key === 'c' || ev.key === 'C')) {
+      const sel = term?.getSelection() ?? '';
+      if (sel.length > 0) {
+        navigator.clipboard?.writeText(sel).catch(() => {});
+        return false;
+      }
+    }
+    return true;
+  });
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = `${proto}://${location.host}/api/terminal/${encodeURIComponent(dir.value)}/${encodeURIComponent(sid.value)}`;
   ws = new WebSocket(url);
