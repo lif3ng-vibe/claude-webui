@@ -65,6 +65,12 @@ impl AppState {
 
     async fn append_log(&self, level: &str, msg: String) {
         let entry = LogEntry { ts: now_ms(), level: level.into(), msg };
+        // 落盘到 desktop.log（无控制台时排查 sidecar 的唯一线索）。
+        if level == "error" {
+            log::error!("sidecar: {}", entry.msg);
+        } else {
+            log::info!("sidecar: {}", entry.msg);
+        }
         {
             let mut g = self.inner.lock().await;
             g.log_buffer.push_back(entry.clone());
@@ -129,11 +135,13 @@ fn project_root() -> PathBuf {
 
 async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
     let node = nodedl::resolve_node().await?;
+    log::info!("resolved node: {} (exists={})", node.display(), node.exists());
 
     let is_dev = cfg!(debug_assertions);
     let mut cmd = if is_dev {
         let root = project_root();
         let tsx = root.join("node_modules").join("tsx").join("dist").join("cli.mjs");
+        log::info!("[dev] tsx={} exists={}", tsx.display(), tsx.exists());
         let mut c = Command::new(node);
         c.arg(tsx).arg(root.join("src").join("server").join("index.ts"));
         c.current_dir(root);
@@ -145,6 +153,13 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
         let res = app.path().resource_dir().map_err(|e| e.to_string())?;
         let server = res.join("dist-server").join("server.js");
         let web_dir = res.join("web");
+        log::info!(
+            "[prod] resource_dir={} | server.js={} exists={} | web/dist/index.html exists={}",
+            res.display(),
+            server.display(),
+            server.exists(),
+            web_dir.join("dist").join("index.html").exists()
+        );
         // node-pty 作 resource 随包（见 tauri.conf.json resources），bundle 的 require('node-pty')
         // 经 NODE_PATH 解析：resource_dir 下（Tauri 保留 node_modules/node-pty 结构）与 node_modules 子目录都覆盖。
         let node_path = if cfg!(windows) {
@@ -195,9 +210,11 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
     let _ = handshake;
 
     if handshake.is_err() {
+        log::error!("sidecar 握手超时（15s 未读到 CLAUDE_WEBUI_PORT；见上方 sidecar stdout/stderr）");
         return Err("sidecar 握手超时".into());
     }
     if got_port.is_none() {
+        log::error!("sidecar 未回传端口（stdout EOF，server 可能启动即崩溃；见上方 sidecar stderr）");
         return Err("sidecar 未回传端口".into());
     }
 
@@ -207,6 +224,7 @@ async fn spawn_sidecar(app: AppHandle, state: AppState) -> Result<(), String> {
         g.started_at = Some(now_ms());
         g.child = Some(child);
     }
+    log::info!("sidecar 握手成功，port={}", got_port.unwrap());
 
     // 握手后剩余 stdout drain。
     let state_for_drain = state.clone();

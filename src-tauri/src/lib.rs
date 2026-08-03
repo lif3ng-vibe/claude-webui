@@ -1,4 +1,5 @@
 // Tauri 主入口：注册 single-instance、注入 desktop bridge（init script）、拉起 sidecar、托盘、窗口控制命令。
+mod desktop_log;
 mod nodedl;
 mod sidecar;
 mod window_state;
@@ -208,6 +209,13 @@ fn build_tray(app: &AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    desktop_log::init();
+    log::info!(
+        "tauri run: debug_assertions={}, target={}{}",
+        cfg!(debug_assertions),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {

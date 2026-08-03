@@ -5,7 +5,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
 import { spawn, type ChildProcess, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
-import { existsSync, createReadStream, createWriteStream } from 'node:fs';
+import { existsSync, createReadStream, createWriteStream, mkdirSync, appendFileSync } from 'node:fs';
 import { homedir, platform, arch } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -13,14 +13,26 @@ import https from 'node:https';
 import { URL } from 'node:url';
 
 const DEV = !!process.env.CLAUDE_WEBUI_DEV;
-const ROOT = resolve(__dirname, '..');
-const WEB_DIR = process.env.CLAUDE_WEBUI_WEB_DIR || join(ROOT, 'web');
-const DIST_SERVER = join(ROOT, 'dist-server', 'server.js');
+const ROOT = resolve(__dirname, '..'); // dev：仓库根；packaged：app.asar 根（仅 in-proc 可读，外部进程读不了）
+// sidecar 由外部 node 进程运行，只能读真实文件：packaged 下经 asarUnpack 落到 app.asar.unpacked。
+const REAL_ROOT = app.isPackaged ? join(process.resourcesPath, 'app.asar.unpacked') : ROOT;
+const WEB_DIR = process.env.CLAUDE_WEBUI_WEB_DIR || join(REAL_ROOT, 'web');
+const DIST_SERVER = join(REAL_ROOT, 'dist-server', 'server.js');
 const CLAUDE_DIR = process.env.CLAUDE_WEBUI_DIR || join(homedir(), '.claude-webui');
 const CACHE_DIR = join(CLAUDE_DIR, 'cache');
 const LOG_DIR = join(CLAUDE_DIR, 'logs');
 const LOG_FILE = join(LOG_DIR, 'sidecar.log');
+const MAIN_LOG = join(LOG_DIR, 'main.log');
 const STATE_FILE = join(CLAUDE_DIR, 'window-state.json');
+
+// 主进程自身日志：记录启动诊断 + 未捕获异常（否则 packaged 下错误只弹窗、无留痕，难排查）。
+function logMain(level: string, msg: string): void {
+  try {
+    mkdirSync(LOG_DIR, { recursive: true });
+    appendFileSync(MAIN_LOG, `${new Date().toISOString()} [${level}] ${msg}\n`);
+  } catch { /* 忽略日志自身失败 */ }
+}
+process.on('uncaughtException', (err) => logMain('error', `uncaughtException: ${err?.stack ?? String(err)}`));
 
 const NODE_VERSION = 'v22.11.0';
 const NODE_DIST = 'https://nodejs.org/dist';
@@ -201,7 +213,7 @@ async function startSidecar(): Promise<void> {
     CLAUDE_WEBUI_HANDSHAKE: '1',
     ...(isDev ? { CLAUDE_WEBUI_DEV: '1' } : { CLAUDE_WEBUI_BUNDLE: '1', CLAUDE_WEBUI_WEB_DIR: WEB_DIR }),
   };
-  const child = spawn(nodeExe, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+  const child = spawn(nodeExe, args, { cwd: REAL_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
   sidecar = child;
   pid = child.pid ?? null;
 
@@ -397,10 +409,13 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     setupIpc();
+    logMain('info', `startup: DEV=${DEV} packaged=${app.isPackaged} REAL_ROOT=${REAL_ROOT}`);
+    logMain('info', `paths: DIST_SERVER=${DIST_SERVER} exists=${existsSync(DIST_SERVER)} | web/dist/index exists=${existsSync(join(WEB_DIR, 'dist', 'index.html'))}`);
     try {
       await startSidecar();
     } catch (e) {
       appendLog('error', String(e));
+      logMain('error', `startSidecar failed: ${String(e)}`);
     }
     await createWindow('/');
     buildTray();

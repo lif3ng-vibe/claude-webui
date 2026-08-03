@@ -32,6 +32,11 @@
       "node_modules/**",
       "package.json"
     ],
+    "asarUnpack": [
+      "dist-server/**",
+      "web/dist/**",
+      "node_modules/node-pty/**"
+    ],
     "mac": {
       "target": [
         {
