@@ -201,11 +201,11 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 
 ### 10.4 GitHub CI（`.github/workflows/build-desktop.yml`）
 - 触发：`push tag v*`（自动建 Release）+ `workflow_dispatch`（手动，仅 artifact）。
-- per-OS + per-arch 矩阵：`windows-latest`(x64) + `macos-latest`(arm64) + `macos-13`(x64)，× {Electron, Tauri} = 6 job，各自原生出包。**弃 universal**：node-pty 是原生模块，per-arch runner 的 `npm ci` 自动拿本机 arch 预编译，无需跨 arch 抓取（实测 node-pty 1.x 预编译随包自带所有平台，见 §11）。Windows 出 nsis/msi（x64）。全部未签名。
+- per-OS + per-arch 矩阵：`windows-latest`(x64) + `macos-latest`(arm64) + `macos-latest`(x64 交叉编译)，× {Electron, Tauri}。**不用 macos-13（Intel runner 排队）**：mac x64 改在 macos-latest 交叉编（Electron `--x64` / Tauri `--target x86_64-apple-darwin`，node-pty 1.x 预编译随包自带 darwin-x64）。Windows 出 nsis/msi（x64）。全部未签名。
 - 脚本：Electron `npm run dist:electron`（`BUILD_ARCH` 传 `--arch`，`electron-builder --publish never`）；Tauri `tauri build [--target <triple>]`（mac `rustup target add <triple>`）。CI 装根 + web 两套依赖。
 - `release` job 仅 tag 触发，用 `softprops/action-gh-release` 汇总所有 `.dmg/.exe/.msi` 上传；upload 按 `runner.os-arch` 命名 artifact。
 - 本地 `.cargo/config.toml`（国内 rsproxy 镜像）已 gitignore，CI 走默认 crates.io。
-- 已知：`macos-13`（Intel）runner 偶发排队拥堵；可改在 `macos-latest` 交叉编 x64（node-pty 预编译已自带）绕开，见 §11 风险。
+- 已知：mac x64 原用 `macos-13`（Intel runner 排队拥堵）→ 已改在 `macos-latest` 交叉编（见上）。
 
 ## 11. 网页交互终端（常驻 `claude --resume` + WebSocket）
 
@@ -213,9 +213,9 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 
 - **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。
 - **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。
-- **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。
+- **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。前端 xterm 拦截 Ctrl+C（有选中则复制剪贴板，无选中放行中断）+ Ctrl/Cmd+V（粘贴剪贴板到 pty）。
 - **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，**预编译按平台且随 npm 包自带所有平台**（`prebuilds/{darwin-arm64,darwin-x64,win32-*}`），按需下载的 Node 22 直接兼容，无需匹配 Node ABI、无需跨 arch 抓取。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources`，sidecar prod env 设 `NODE_PATH=<resource_dir>[:<resource_dir>/node_modules]` 让 bundle 的 `require('node-pty')` 解析。
-- **风险/待办**：完整 dev/prod 终端在桌面安装包里跑通需实测（node-pty 预编译随包、Tauri `NODE_PATH` 解析）；CI 的 `macos-13`（Intel）runner 偶发排队拥堵——因 node-pty 预编译已自带 darwin-x64，可把 mac x64 改到 `macos-latest` 交叉编（Tauri `--target x86_64-apple-darwin` + `rustup target add`；Electron `--x64`）绕开，无需 Intel runner。
+- **风险/待办**：完整 dev/prod 终端在桌面安装包里跑通需实测（node-pty 预编译随包、Tauri `NODE_PATH` 解析）；spawn claude 显式设 `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`（防继承 `CLAUDE_CODE_CHILD_SESSION` 导致不写 transcript、Sessions 视图看不到新对话）。CI mac x64 已改 macos-latest 交叉编（不再排 macos-13）。
 
 ## 12. 飞书机器人（远程续接 session + 完成通知）
 
@@ -242,7 +242,7 @@ claude-webui 充当**可观测的 LLM 网关**：外部工具（Claude Code / Cu
 - **路由**：`body.model` 精确匹配 provider.model（去后缀比较），无匹配用活动 provider。
 - **记录**：`~/.claude-webui/gateway/<id>.json`，`{id,createdAt,providerId,model,stream,request,response,elapsedMs,status,error?}`。
 - **认证**：可选 `gatewayKey`（config，留空=本地不校验）；客户端带 `x-api-key` 或 `Authorization: Bearer`。
-- **端点**：`POST /v1/messages`（Anthropic 入参）、`POST /v1/chat/completions`（OpenAI 入参）；`GET /api/gateway/logs?q`、`GET/DELETE /api/gateway/logs/:id`、`PUT /api/gateway/key`。
+- **端点**：`POST /v1/messages`（Anthropic 入参）、`POST /v1/chat/completions`（OpenAI 入参）；`GET /api/gateway/logs?q`、`GET/DELETE /api/gateway/logs/:id`、`PUT /api/gateway/key`、`POST /api/gateway/test`（「中转」页测试按钮：用活动/指定 provider 发测试请求并记录，列表标 [测试]）。
 - **前端**：`GatewayLog.vue`（列表+详情，复用 `renderContent` 渲染 request/response）+ MainApp 顶栏「中转」tab + 网关 key 设置。
 - **交付边界**：真实联调需用户配 provider（baseURL/key/model/type）并把工具 base URL 指向本服务；流式 SSE pipe / 跨格式流式转换在 Node 18+ fetch 上实测。
 - **风险/待办**：跨格式流式转换为事件级（覆盖 text/tool_use/finish，不保证字节等价，不支持多模态 image / thinking 转换）；headers 透传边界；OpenAI 系 provider 真实联调待测。

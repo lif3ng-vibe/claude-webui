@@ -26,5 +26,9 @@
 - `npm run dev` 启开发服务（http://localhost:3000）。
 - 续接 session 前置：每个 sessionId 加锁，禁止并发写同一 session。
 
+## 文档同步
+- 每次新增功能或改变行为，**同步更新 `README.md`**（面向用户的功能列表 / 用法）与 `docs/design.md`（设计 / 决策）。README 必须随功能迭代更新，不能滞后。
+- commit 前自查：这次改的功能 README / design 是否已体现。
+
 ## 当前进度
 状态与下一步见 `docs/design.md` 的"当前进度 / 下一步"一节。开工前先读该节，再按需读全文。
