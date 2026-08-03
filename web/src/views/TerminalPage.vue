@@ -36,14 +36,25 @@ onMounted(() => {
   term.open(termEl.value);
   fit.fit();
 
-  // Ctrl+C：有选中文本则复制到剪贴板（不发 SIGINT）；无选中则放行（中断进程）。
+  // Ctrl+C：有选中复制；Ctrl+V / Cmd+V：粘贴剪贴板到终端。
   term.attachCustomKeyEventHandler((ev) => {
-    if (ev.type === 'keydown' && ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.key === 'c' || ev.key === 'C')) {
+    if (ev.type !== 'keydown') return true;
+    if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.key === 'c' || ev.key === 'C')) {
       const sel = term?.getSelection() ?? '';
       if (sel.length > 0) {
         navigator.clipboard?.writeText(sel).catch(() => {});
         return false;
       }
+      return true;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'v' || ev.key === 'V')) {
+      navigator.clipboard
+        ?.readText()
+        .then((text) => {
+          if (text && ws && ws.readyState === WebSocket.OPEN) ws.send(enc.encode(text) as unknown as ArrayBuffer);
+        })
+        .catch(() => {});
+      return false;
     }
     return true;
   });
