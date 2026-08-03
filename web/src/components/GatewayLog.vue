@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { NInput, NButton, NTag, useMessage } from 'naive-ui';
+import { NInput, NButton, NSelect, NTag, useMessage } from 'naive-ui';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
 import { api, deleteGatewayLog, saveGatewayKey, gatewayTest, type GatewayLog, type ConfigResponse } from '../api';
 import { renderContent } from '../lib/render';
