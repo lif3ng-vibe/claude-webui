@@ -184,6 +184,23 @@ export async function saveGatewayKey(key: string): Promise<void> {
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
+export interface GatewayTestResult {
+  ok: boolean;
+  model?: string;
+  content?: string;
+  elapsedMs: number;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  error?: string;
+}
+export async function gatewayTest(providerId?: string, prompt?: string): Promise<GatewayTestResult> {
+  const r = await fetch('/api/gateway/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ providerId, prompt }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
 
 export const api = {
   projects: () => getJSON<ProjectEntry[]>('/api/projects'),

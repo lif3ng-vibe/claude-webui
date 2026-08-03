@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue';
 import { NInput, NButton, NTag, useMessage } from 'naive-ui';
 import { useQuery, useQueryClient } from '@tanstack/vue-query';
-import { api, deleteGatewayLog, saveGatewayKey, type GatewayLog, type ConfigResponse } from '../api';
+import { api, deleteGatewayLog, saveGatewayKey, gatewayTest, type GatewayLog, type ConfigResponse } from '../api';
 import { renderContent } from '../lib/render';
 
 const msg = useMessage();
@@ -30,6 +30,20 @@ async function saveKey(): Promise<void> {
     msg.error(String(e));
   }
 }
+const testResult = ref<{ ok: boolean; content?: string; error?: string; model?: string; elapsedMs?: number } | null>(null);
+const testing = ref(false);
+async function runTest(): Promise<void> {
+  testing.value = true;
+  testResult.value = null;
+  try {
+    testResult.value = await gatewayTest();
+  } catch (e) {
+    testResult.value = { ok: false, error: String(e) };
+  } finally {
+    testing.value = false;
+  }
+}
+
 async function del(id: string): Promise<void> {
   try {
     await deleteGatewayLog(id);
@@ -50,6 +64,13 @@ function fmtTime(ms: number): string {
       <NInput v-model:value="q" size="small" placeholder="过滤 model / provider / status" class="flex-1" />
       <NInput v-model:value="gwKey" size="small" :placeholder="hasKey ? '网关 key 已设（留空不改）' : '设置网关 key（留空=不校验）'" style="width: 260px" />
       <NButton size="small" @click="saveKey">保存 key</NButton>
+      <NButton size="small" :loading="testing" @click="runTest">测试中转</NButton>
+    </div>
+    <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'err'">
+      <b>{{ testResult.ok ? '✓ 测试通过' : '✗ 测试失败' }}</b>
+      <span v-if="testResult.model" class="meta">{{ testResult.model }} · {{ testResult.elapsedMs }}ms</span>
+      <div v-if="testResult.content" class="test-content">{{ testResult.content }}</div>
+      <div v-if="testResult.error" class="err-text">{{ testResult.error }}</div>
     </div>
     <div class="flex-1 min-h-0 overflow-auto">
       <div v-for="l in filtered" :key="l.id" class="row" :class="{ sel: selected?.id === l.id }" @click="selected = selected?.id === l.id ? null : l">
@@ -112,4 +133,10 @@ function fmtTime(ms: number): string {
 .sys { font-size: 12px; color: #aaa; background: #1a1a1a; padding: 6px; border-radius: 4px; margin: 4px 0; white-space: pre-wrap; }
 .msg-block { padding: 4px 0 4px 8px; border-left: 2px solid #333; margin: 4px 0; }
 .role { font-size: 11px; color: #8ab4f8; }
+.test-result { margin: 0 8px 8px; padding: 8px 12px; border-radius: 6px; font-size: 12px; }
+.test-result.ok { background: #0f2a1a; border: 1px solid #2a5a3a; color: #6ee7b7; }
+.test-result.err { background: #2a1010; border: 1px solid #5a2a2a; color: #f87171; }
+.test-result .meta { margin-left: 8px; color: #888; }
+.test-content { margin-top: 4px; color: #ddd; white-space: pre-wrap; }
+.err-text { margin-top: 4px; word-break: break-all; }
 </style>

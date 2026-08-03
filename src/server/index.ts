@@ -15,6 +15,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { createTerminalHandler } from '../terminal/TerminalManager.js';
 import { handleMessages, handleChatCompletions } from '../gateway/routes.js';
 import { listLogs, getLog, removeLog } from '../gateway/store.js';
+import { testProvider } from '../gateway/test.js';
 import { FeishuBot } from '../feishu/Bot.js';
 import { SessionState } from '../feishu/SessionState.js';
 import { Notifier } from '../feishu/Notifier.js';
@@ -475,6 +476,11 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       const b = await readBody(req);
       await saveGatewayKey(typeof b.gatewayKey === 'string' ? b.gatewayKey : undefined);
       return json(res, 200, { ok: true });
+    }
+    if (path === '/api/gateway/test' && req.method === 'POST') {
+      const b = await readBody(req);
+      const r = await testProvider(b.providerId ? String(b.providerId) : undefined, b.prompt ? String(b.prompt) : undefined);
+      return json(res, 200, r);
     }
     let glm: RegExpMatchArray | null;
     if ((glm = path.match(/^\/api\/gateway\/logs\/([^/]+)$/))) {
