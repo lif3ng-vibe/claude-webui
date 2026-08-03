@@ -26,10 +26,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      { "src": "../dist-server", "target": "dist-server/" },
-      { "src": "../web/dist", "target": "web/dist/" },
-      { "src": "../node_modules/node-pty", "target": "node_modules/node-pty/" }
-    ]
+    "resources": {
+      "../dist-server": "dist-server/",
+      "../web/dist": "web/dist/",
+      "../node_modules/node-pty": "node_modules/node-pty/"
+    }
   }
 }
