@@ -20,8 +20,8 @@
     "build:tauri": "tauri build"
   },
   "build": {
-    "appId": "app.claude-webui",
-    "productName": "claude-webui",
+    "appId": "app.claude-webui.electron",
+    "productName": "claude-webui (Electron)",
     "directories": {
       "output": "release"
     },

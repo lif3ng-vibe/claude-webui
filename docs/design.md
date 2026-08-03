@@ -201,10 +201,12 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **Windows `\\?\` verbatim 路径前缀（坑，曾导致 Tauri 安装后无窗口）**：Tauri 的 `resource_dir()` 在 Windows 可能返回带 `\\?\` 前缀的路径，原样当 `node` 脚本路径传过去会让 node 模块加载器报 `Cannot find module`（`\\?\C:\...` 被解析坏）→ 进程退出 → 无端口 → 无窗口。`sidecar.rs` 的 `strip_verbatim()` 统一剥掉 `\\?\`（及 `\\?\UNC\`）前缀后再用于 argv/env（安装路径短，剥掉安全）。
 - **Electron 主进程 CJS/ESM（坑，曾导致安装包打不开）**：根 `package.json` 有 `"type":"module"`，而 `electron/tsconfig.json` 编译 `module:CommonJS`，产物 `dist-electron/{main,preload}.js` 是 CJS（开头即 `exports`/`require`）。Node 按最近祖先 `package.json` 的 `type` 判定模块类型——根的 `module` 会让 `.js` 被当 ESM，运行报 `exports is not defined in ES module scope`，app 直接打不开。解法：在 `dist-electron/` 放一个 `{"type":"commonjs"}` 覆盖。**三处构建脚本（`dev-electron`/`build-electron`/`dist-electron`）tsc 之后都必须写这个文件**（`scripts/ensureElectronPkg.mjs` 统一提供）——只改 dev 路径、漏掉打包路径，CI 出来的包照样打不开（此坑已踩）。
 - 安装包/签名未做（`electron-builder --dir` + `tauri build` 仅出 unpacked/产物）。
+- **双构建共存**：Electron 与 Tauri 用不同身份——`app.claude-webui.electron` / `claude-webui (Electron)` 与 `app.claude-webui.tauri` / `claude-webui (Tauri)`——安装目录、快捷方式、卸载条目各自独立，可同机同时安装与运行（生产环境端口随机+握手 `CLAUDE_WEBUI_PORT`、单例锁互不影响）；两端共享 `~/.claude-webui` 数据，同时运行时避免并发写同一条对话/同一份配置（对话按 `<id>.json` 单文件存，不同对话天然不冲突）。
 - dev 下 Electron sidecar 固定 3000，勿与 web 流程的 3000 同时占用。
 
 ### 10.4 GitHub CI（`.github/workflows/build-desktop.yml`）
 - 触发：`push tag v*`（自动建 Release）+ `workflow_dispatch`（手动，仅 artifact）。
+- **版本随 tag**：electron / tauri 两端 job 构建前都跑 `node scripts/sync-version.mjs "${GITHUB_REF_NAME#v}"`（仅 `startsWith refs/tags/v` 触发），把 `package.json` / `web/package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` 四处版本统一写成 tag 去掉前缀 `v` 的值。否则 electron-builder 用 `package.json` 的基线版本、Tauri 用 `tauri.conf.json` 的旧值，产物内嵌版本与 Release tag 不符且两端不一致（v0.0.6 时踩过）。手动 `workflow_dispatch` 不触发，沿用仓库基线 `0.0.0`。
 - per-OS + per-arch 矩阵：`windows-latest`(x64) + `macos-latest`(arm64) + `macos-latest`(x64 交叉编译)，× {Electron, Tauri}。**不用 macos-13（Intel runner 排队）**：mac x64 改在 macos-latest 交叉编（Electron `--x64` / Tauri `--target x86_64-apple-darwin`，node-pty 1.x 预编译随包自带 darwin-x64）。Windows 出 nsis/msi（x64）。全部未签名。
 - 脚本：Electron `npm run dist:electron`（`BUILD_ARCH` 传 `--arch`，`electron-builder --publish never`）；Tauri `tauri build [--target <triple>]`（mac `rustup target add <triple>`）。CI 装根 + web 两套依赖。
 - `release` job 仅 tag 触发，用 `softprops/action-gh-release` 汇总所有 `.dmg/.exe/.msi` 上传；upload 按 `runner.os-arch` 命名 artifact。

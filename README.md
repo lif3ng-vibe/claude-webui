@@ -47,6 +47,8 @@ cd web && npm run dev    # 前端 UI：http://localhost:5173（代理 /api 到 3
 - web 单进程：`npm run build:web` → `npm run dev`（后端 serve web/dist）
 - 后端打包：`npm run build:server`（esbuild → `dist-server/server.js`）
 - 桌面安装包：`npm run dist:electron` / `npm run build:tauri`；**打 tag `v*` CI 自动构建** Win + Mac（mac x64 在 macos-latest 交叉编译）
+- **Electron 与 Tauri 可共存**：两者身份已区分——Electron `appId=app.claude-webui.electron` / `productName=claude-webui (Electron)`，Tauri `identifier=app.claude-webui.tauri` / `productName=claude-webui (Tauri)`。安装目录、快捷方式、卸载条目各自独立，可同时安装并同时运行（端口生产环境随机分配、单例锁互不影响）。两端共享 `~/.claude-webui` 数据；同时运行时避免在两端编辑同一条对话或同一份配置即可。
+- **版本随 tag**：打 `v1.2.3` 时 CI 用 `scripts/sync-version.mjs` 把该版本写入 Electron + Tauri 四处版本来源，产物内嵌版本与 Release tag 一致、两端相同；本地手动构建可 `node scripts/sync-version.mjs <x.y.z>` 对齐。
 
 ## 配置
 

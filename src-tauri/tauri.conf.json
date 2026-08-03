@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "claude-webui",
-  "version": "0.1.0",
-  "identifier": "app.claude-webui",
+  "productName": "claude-webui (Tauri)",
+  "version": "0.0.0",
+  "identifier": "app.claude-webui.tauri",
   "build": {
     "frontendDist": "../web/dist",
     "devUrl": "http://localhost:5173",
