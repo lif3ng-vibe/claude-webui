@@ -9,6 +9,9 @@ import { api, type ProjectEntry, type SessionEntry } from '../api';
 import { renderContent, renderTool, renderMd, hl, fmtBytes, fmtTime, esc } from '../lib/render';
 import Icon from './Icon.vue';
 import InteractionPicker from './InteractionPicker.vue';
+import NewSessionDialog from './NewSessionDialog.vue';
+import ProviderMenu from './ProviderMenu.vue';
+import { useProviderMenu } from '../composables/useProviderMenu';
 import { useInteractionPicker } from '../composables/useInteractionPicker';
 import { iconSvg } from '../lib/icons';
 import { readSSE, type SSEEvent } from '../lib/sse';
@@ -40,6 +43,8 @@ function runLabel(s?: string): string {
 }
 
 const msg = useMessage();
+const showNew = ref(false);
+const newMenu = useProviderMenu();
 function copyResume(cwd: string, sid: string): void {
   if (runningMap.value.has(sid) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
   navigator.clipboard
@@ -463,6 +468,9 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
       <div class="sticky top-0 bg-[#1a1a1a] p-2 border-b border-[#333] z-[1]">
         <div class="flex items-center mb-2">
           <div class="text-[#8ab4f8] text-[15px] flex-1">Claude sessions</div>
+          <button class="icon-btn" title="新建会话（右键选 provider）" @click="showNew = true" @contextmenu.prevent="newMenu.open($event, () => { showNew = true })">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
           <NPopover trigger="click" placement="bottom-end" :width="280">
             <template #trigger>
               <button class="icon-btn" title="显示与排序设置">
@@ -605,5 +613,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
       @select="onPick"
       @close="closeIX"
     />
+    <NewSessionDialog :show="showNew" @update:show="showNew = $event" />
+    <ProviderMenu :show="newMenu.show.value" :x="newMenu.x.value" :y="newMenu.y.value" @choose="newMenu.choose" @update:show="newMenu.show.value = $event" />
   </div>
 </template>

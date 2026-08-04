@@ -1,3 +1,5 @@
+import { readSSE, type SSEEvent } from './lib/sse';
+
 export interface ProjectEntry {
   dirName: string;
   cwd: string;
@@ -185,6 +187,31 @@ export async function saveGatewayKey(key: string): Promise<void> {
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
+/** 复制命令（含 provider env 的 resume 命令，后端生成因前端无密钥）。 */
+export async function copyCommand(dir: string, sid: string, providerId?: string): Promise<string> {
+  const q = providerId ? `?provider=${encodeURIComponent(providerId)}` : '';
+  const r = await fetch(`/api/projects/${dir}/sessions/${sid}/copy-command${q}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return ((await r.json()) as { command: string }).command;
+}
+
+/** 新建会话 SSE：POST /api/sessions/new，逐事件回调（created/stream-json/stderr/exit/error/done）。 */
+export async function createSessionStream(
+  cwd: string,
+  prompt: string,
+  onEvent: (ev: SSEEvent) => void,
+  opts: { providerId?: string; signal?: AbortSignal } = {},
+): Promise<void> {
+  const resp = await fetch('/api/sessions/new', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ cwd, prompt, providerId: opts.providerId }),
+    signal: opts.signal,
+  });
+  if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
+  await readSSE(resp, onEvent);
+}
+
 export interface GatewayTestResult {
   ok: boolean;
   model?: string;

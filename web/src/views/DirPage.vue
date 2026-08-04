@@ -8,6 +8,9 @@ import { api, type SessionEntry } from '../api';
 import { useDisplayStore } from '../stores/display';
 import { hl, fmtBytes, fmtTime } from '../lib/render';
 import Icon from '../components/Icon.vue';
+import NewSessionDialog from '../components/NewSessionDialog.vue';
+import ProviderMenu from '../components/ProviderMenu.vue';
+import { useProviderMenu } from '../composables/useProviderMenu';
 import { setTitle } from '../lib/head';
 import { openWindow } from '../lib/openWindow';
 
@@ -17,6 +20,8 @@ const dir = computed(() => String(route.params.dir));
 
 const display = useDisplayStore();
 const msg = useMessage();
+const showNew = ref(false);
+const newMenu = useProviderMenu();
 const sessionSortOptions = [
   { label: '更新时间', value: 'updated' },
   { label: '名称', value: 'name' },
@@ -99,6 +104,9 @@ function copyResume(s: SessionEntry): void {
 <template>
   <div class="h-full flex flex-col">
     <div class="dir-header">
+      <button class="icon-btn" title="新建会话（右键选 provider）" @click="showNew = true" @contextmenu.prevent="newMenu.open($event, () => { showNew = true })">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
       <NPopover trigger="click" placement="bottom-end" :width="240">
         <template #trigger>
           <button class="icon-btn" title="显示与排序设置">
@@ -129,6 +137,8 @@ function copyResume(s: SessionEntry): void {
         <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>
       </div>
     </div>
+    <NewSessionDialog :show="showNew" @update:show="showNew = $event" />
+    <ProviderMenu :show="newMenu.show.value" :x="newMenu.x.value" :y="newMenu.y.value" @choose="newMenu.choose" @update:show="newMenu.show.value = $event" />
   </div>
 </template>
 
