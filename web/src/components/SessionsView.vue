@@ -45,6 +45,14 @@ function runLabel(s?: string): string {
 const msg = useMessage();
 const showNew = ref(false);
 const newMenu = useProviderMenu();
+const pendingDir = ref<string | undefined>();
+const pendingProviderId = ref<string | undefined>();
+/** 打开新建会话对话框；dir 预填工作目录，pid 预选 provider。 */
+function openNew(dir?: string, pid?: string): void {
+  pendingDir.value = dir;
+  pendingProviderId.value = pid;
+  showNew.value = true;
+}
 function copyResume(dirName: string, cwd: string, sid: string, providerId?: string): void {
   if (runningMap.value.has(sid) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
   if (providerId) {
@@ -476,7 +484,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
       <div class="sticky top-0 bg-[#1a1a1a] p-2 border-b border-[#333] z-[1]">
         <div class="flex items-center mb-2">
           <div class="text-[#8ab4f8] text-[15px] flex-1">Claude sessions</div>
-          <button class="icon-btn" title="新建会话（右键选 provider）" @click="showNew = true" @contextmenu.prevent="newMenu.open($event, () => { showNew = true })">
+          <button class="icon-btn" title="新建会话（右键选 provider）" @click="openNew()" @contextmenu.prevent="newMenu.open($event, (pid?: string) => openNew(undefined, pid))">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
           </button>
           <NPopover trigger="click" placement="bottom-end" :width="280">
@@ -520,6 +528,9 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               <span class="title" :title="node.p.cwd" v-html="hl(node.p.cwd, q)" />
               <span v-if="display.showDirTime" class="dir-time">{{ fmtTime(node.p.latestMtimeMs) }}</span>
               <span v-if="display.showCountBadge" class="count-badge">{{ node.p.sessionCount }}</span>
+              <button class="icon-btn-sm" title="在此目录新建会话（右键选 provider）" @click.stop="openNew(node.p.cwd)" @contextmenu.prevent="newMenu.open($event, (pid?: string) => openNew(node.p.cwd, pid))">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
               <button class="icon-btn-sm popout" title="新窗口打开该目录" @click.stop="popDir(node.p)"><Icon name="arrow-up-right" :size="14" /></button>
             </div>
             <div v-if="node.show && node.open" class="sub-tree">
@@ -621,7 +632,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
       @select="onPick"
       @close="closeIX"
     />
-    <NewSessionDialog :show="showNew" @update:show="showNew = $event" />
+    <NewSessionDialog :show="showNew" :default-dir="pendingDir" :default-provider-id="pendingProviderId" @update:show="showNew = $event" />
     <ProviderMenu :show="newMenu.show.value" :x="newMenu.x.value" :y="newMenu.y.value" @choose="newMenu.choose" @update:show="newMenu.show.value = $event" />
   </div>
 </template>

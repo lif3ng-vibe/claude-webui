@@ -4,7 +4,7 @@
 
 ## 功能
 
-1. **Claude session 查看 / 续接 / 深问** — 只读 `~/.claude/projects/**`，浏览工作目录 → session → 消息时间线（markdown + 代码高亮 + 搜索）；续接 session 发指令（CLI 包裹 `claude --resume`，SSE 流式，per-sessionId 锁防分叉）；**目录内新建会话**（桌面端原生选目录框 / web 输入路径，单发首条指令或交互式终端，建完直接跳转）；就某一步向 LLM 深问（只读磁盘工具查证）。
+1. **Claude session 查看 / 续接 / 深问** — 只读 `~/.claude/projects/**`，浏览工作目录 → session → 消息时间线（markdown + 代码高亮 + 搜索）；续接 session 发指令（CLI 包裹 `claude --resume`，SSE 流式，per-sessionId 锁防分叉）；**目录内新建会话**（桌面端原生选目录框 / web 从已用目录列表选或手输路径，对话框内可选 provider，单发首条指令或交互式终端，建完直接跳转；目录行右侧「+」可直接在该目录新建）；就某一步向 LLM 深问（只读磁盘工具查证）。
 2. **Anthropic 对话** — 预置系统提示词库 + 流式对话；多 provider 配置（UI 管理 + 切换），兼容任何 Anthropic 兼容代理。
 3. **网页交互终端** — 浏览器里 xterm.js 经 WebSocket 跑 `claude --resume` 的原生 TUI（node-pty）；选中 Ctrl+C 复制、Ctrl/Cmd+V 粘贴。
 4. **桌面端（Electron + Tauri 双构建）** — 同一套 web 前端，托盘保活、无边框标题栏、服务管理页；桌面端常驻即可让飞书机器人 / 中转网关一直在线。
@@ -13,7 +13,7 @@
 
 页面快捷键：`Ctrl/Cmd + +/-/0` 缩放页面（标题栏与主导航不缩放、倍数记忆）；`F12` / `Ctrl(Cmd)+Shift+I` 打开 DevTools（桌面壳；web 走浏览器原生）。
 
-**右键选 provider 启动**：新建会话、续接发送、🖥 终端、📋 复制命令四个按钮都支持右键 → 选一个 provider，经 `claude --settings` 把该 provider 的 `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`MODEL` 注入这次启动（特定大模型供应商 × 本次会话上下文绑定，一次性不持久化）。用 `--settings` 而非环境变量，是因为 `~/.claude/settings.json`（cc-switch 等工具写）的 env 会覆盖进程环境变量，`--settings` 优先级更高才能盖过。左键不选 = 走 claude 自身配置（即 `~/.claude/settings.json`，cc-switch 当前选中）。
+**新建会话选 provider / 选目录**：「+ 新会话」对话框内可直接选 **provider**（下拉：默认=走 claude 自身 `~/.claude/settings.json` 配置，即 cc-switch 当前选中；或任一已配 provider，经 `claude --settings` 把该 provider 的 `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`MODEL` 注入这次启动，一次性不持久化）。**选目录**：桌面端弹原生文件夹框；web 端点「选择目录…」从已用工作目录列表里挑，全新目录手输。主页每个目录行右侧有「+」，点击直接在该目录下新建；外层「+」按钮与目录行「+」右键均可预选 provider 进对话框。续接 `发送`、🖥 终端、📋 复制命令三个按钮仍支持右键 → 选 provider（机制同上）。用 `--settings` 而非环境变量，是因为 `~/.claude/settings.json`（cc-switch 等工具写）的 env 会覆盖进程环境变量，`--settings` 优先级更高才能盖过。左键不选 = 走 claude 自身配置（即 `~/.claude/settings.json`，cc-switch 当前选中）。
 
 约定见 [`CLAUDE.md`](CLAUDE.md)。
 

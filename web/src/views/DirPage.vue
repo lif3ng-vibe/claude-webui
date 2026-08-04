@@ -22,6 +22,15 @@ const display = useDisplayStore();
 const msg = useMessage();
 const showNew = ref(false);
 const newMenu = useProviderMenu();
+const pendingDir = ref<string | undefined>();
+const pendingProviderId = ref<string | undefined>();
+/** 打开新建会话对话框；预填当前目录 cwd，pid 预选 provider。 */
+function openNew(pid?: string): void {
+  const p = (projectsQuery.data.value ?? []).find((x) => x.dirName === dir.value);
+  pendingDir.value = p?.cwd;
+  pendingProviderId.value = pid;
+  showNew.value = true;
+}
 const sessionSortOptions = [
   { label: '更新时间', value: 'updated' },
   { label: '名称', value: 'name' },
@@ -111,7 +120,7 @@ function copyResume(s: SessionEntry, providerId?: string): void {
 <template>
   <div class="h-full flex flex-col">
     <div class="dir-header">
-      <button class="icon-btn" title="新建会话（右键选 provider）" @click="showNew = true" @contextmenu.prevent="newMenu.open($event, () => { showNew = true })">
+      <button class="icon-btn" title="新建会话（右键选 provider）" @click="openNew()" @contextmenu.prevent="newMenu.open($event, (pid?: string) => openNew(pid))">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
       </button>
       <NPopover trigger="click" placement="bottom-end" :width="240">
@@ -144,7 +153,7 @@ function copyResume(s: SessionEntry, providerId?: string): void {
         <div v-if="display.showSessionSub" class="sub" :title="sessionSub(s)">{{ sessionSub(s) }}</div>
       </div>
     </div>
-    <NewSessionDialog :show="showNew" @update:show="showNew = $event" />
+    <NewSessionDialog :show="showNew" :default-dir="pendingDir" :default-provider-id="pendingProviderId" @update:show="showNew = $event" />
     <ProviderMenu :show="newMenu.show.value" :x="newMenu.x.value" :y="newMenu.y.value" @choose="newMenu.choose" @update:show="newMenu.show.value = $event" />
   </div>
 </template>
