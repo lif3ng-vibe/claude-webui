@@ -5,6 +5,7 @@
 import * as nodePty from 'node-pty';
 import type { WebSocket } from 'ws';
 import type { ClaudeFileReader } from '../claude/FileReader.js';
+import { writeProviderSettings, delProviderSettings } from '../claude/providerSettings.js';
 
 /** 终端启动选项：resume 续接既有 session；new 在指定 cwd 新建。env=注入的 provider 环境变量。 */
 export type TerminalOpts =
@@ -31,6 +32,7 @@ export function createTerminalHandler(reader: ClaudeFileReader, lockSet: Set<str
   return async (ws, opts) => {
     let pty: nodePty.IPty | null = null;
     let cleaned = false;
+    let settingsFile: string | undefined;
     const { args, lockKey } = spawnSpec(opts);
 
     const cleanup = () => {
@@ -41,6 +43,7 @@ export function createTerminalHandler(reader: ClaudeFileReader, lockSet: Set<str
         try { pty.kill(); } catch { /* 已退出 */ }
         pty = null;
       }
+      if (settingsFile) void delProviderSettings(settingsFile);
     };
 
     // 解析 cwd：resume 从 session jsonl；new 直接用 opts.cwd。
@@ -64,9 +67,16 @@ export function createTerminalHandler(reader: ClaudeFileReader, lockSet: Set<str
     }
     lockSet.add(lockKey);
 
+    // provider env 经 --settings 注入（优先级高于 ~/.claude/settings.json，可盖过 cc-switch），
+    // 而非 spawn env（会被 settings.json 的 env 块覆盖）。临时文件避免 cmd.exe 解析 JSON。
+    if (opts.env && Object.keys(opts.env).length) {
+      settingsFile = await writeProviderSettings(opts.env);
+      args.push('--settings', process.platform === 'win32' ? `"${settingsFile}"` : settingsFile);
+    }
+
     // spawn 交互式 claude（不带 -p / --output-format，跑原生 TUI；--dangerously-skip-permissions 与单发一致）。
     const isWin = process.platform === 'win32';
-    const env = { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1', ...opts.env };
+    const env = { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' };
     try {
       pty = isWin
         ? nodePty.spawn(process.env.ComSpec || 'cmd.exe', ['/c', 'claude', ...args], {
