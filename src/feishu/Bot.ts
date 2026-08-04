@@ -1,5 +1,6 @@
 import type { ClaudeFileReader } from '../claude/FileReader.js';
 import type { ClaudeRunEvent, ClaudeNewRequest } from '../claude/Runner.js';
+import { extractSessionId } from '../claude/Runner.js';
 import { encodeCwd } from '../claude/pathEncoding.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
 import { handleCommand } from './commands.js';
@@ -224,15 +225,4 @@ export class FeishuBot {
       this.currentAbort = null;
     }
   }
-}
-
-/** 从 stream-json 事件提取 session_id（新建 session 后用于设为当前）。 */
-function extractSessionId(d: unknown): string | null {
-  if (!d || typeof d !== 'object') return null;
-  const o = d as Record<string, unknown>;
-  if (typeof o.session_id === 'string') return o.session_id;
-  if (typeof o.sessionId === 'string') return o.sessionId;
-  const msg = o.message as Record<string, unknown> | undefined;
-  if (msg && typeof msg.sessionId === 'string') return msg.sessionId;
-  return null;
 }

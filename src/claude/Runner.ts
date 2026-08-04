@@ -15,6 +15,8 @@ export interface ClaudeRunRequest {
   disallowedTools?: string[];
   /** 覆盖模型。 */
   model?: string;
+  /** 注入子进程的环境变量（右键选 provider / 飞书 /provider），覆盖 process.env。 */
+  env?: Record<string, string>;
   /** 中断底层进程。 */
   signal?: AbortSignal;
 }
@@ -24,6 +26,8 @@ export interface ClaudeNewRequest {
   cwd: string;
   prompt: string;
   model?: string;
+  /** 注入子进程的环境变量（右键选 provider / 飞书 /provider），覆盖 process.env。 */
+  env?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -131,7 +135,7 @@ export class ClaudeRunner {
       cwd: req.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
-      env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' },
+      env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1', ...req.env },
     });
     if (child.stdin) {
       child.stdin.write(req.prompt);
@@ -151,7 +155,7 @@ export class ClaudeRunner {
       cwd: req.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
-      env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' },
+      env: { ...process.env, CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1', ...req.env },
     });
     if (child.stdin) {
       child.stdin.write(req.prompt);
@@ -191,4 +195,15 @@ class AsyncQueue<T> {
       yield r.value;
     }
   }
+}
+
+/** 从 stream-json 事件提取 session_id（新建 session 后用于设为当前 / 跳转）。 */
+export function extractSessionId(d: unknown): string | null {
+  if (!d || typeof d !== 'object') return null;
+  const o = d as Record<string, unknown>;
+  if (typeof o.session_id === 'string') return o.session_id;
+  if (typeof o.sessionId === 'string') return o.sessionId;
+  const msg = o.message as Record<string, unknown> | undefined;
+  if (msg && typeof msg.sessionId === 'string') return msg.sessionId;
+  return null;
 }
