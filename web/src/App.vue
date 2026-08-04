@@ -56,7 +56,10 @@ watch(() => display.zoom, applyZoom);
 <template>
   <NConfigProvider :theme="darkTheme">
     <NMessageProvider>
-      <div class="flex flex-col h-full">
+      <!-- 显式视口高度绕开 NConfigProvider/NMessageProvider 包裹层对 h-full 百分比链的断开：
+           这两层 provider 渲染的 div 高度 auto，会让子级 h-full=100% 解析成 auto → 内容溢出 body。
+           用 calc(100vh/zoom) 直接定高，下游 flex-1 min-h-0 + 各页 overflow-auto 才能正确撑满与滚动。 -->
+      <div class="flex flex-col" style="height: calc(100vh / var(--zoom))">
         <TitleBar />
         <div class="flex-1 min-h-0">
           <router-view />
