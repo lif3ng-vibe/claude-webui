@@ -129,3 +129,34 @@ export async function resolveProvider(id?: string): Promise<{
     maxTokens,
   };
 }
+
+/**
+ * 把某 provider（或 active/env 兜底）解析为 Claude CLI 原生识别的环境变量字典。
+ * 用于把 claude --resume / claude -p 绑定到特定 provider（右键选 provider、飞书 /provider）。
+ * authToken 优先于 apiKey；model 去后缀。
+ */
+export async function providerEnv(providerId?: string): Promise<Record<string, string>> {
+  const cfg = await resolveProvider(providerId);
+  const env: Record<string, string> = {};
+  if (cfg.baseURL) env.ANTHROPIC_BASE_URL = cfg.baseURL;
+  if (cfg.authToken) env.ANTHROPIC_AUTH_TOKEN = cfg.authToken;
+  else if (cfg.apiKey) env.ANTHROPIC_API_KEY = cfg.apiKey;
+  if (cfg.defaultModel) env.ANTHROPIC_MODEL = cfg.defaultModel;
+  return env;
+}
+
+/**
+ * 按名称/id 前缀匹配 provider（飞书 /provider 命令用）。
+ * 顺序：精确 id → 名称大小写不敏感相等 → id 前缀（大小写不敏感）。返回 id 或 undefined。
+ */
+export async function matchProvider(query: string): Promise<string | undefined> {
+  const q = query.trim();
+  if (!q) return undefined;
+  const { providers } = await publicConfig();
+  const exact = providers.find((p) => p.id === q);
+  if (exact) return exact.id;
+  const byName = providers.find((p) => (p.name ?? '').toLowerCase() === q.toLowerCase());
+  if (byName) return byName.id;
+  const byPrefix = providers.find((p) => p.id.toLowerCase().startsWith(q.toLowerCase()));
+  return byPrefix?.id;
+}
