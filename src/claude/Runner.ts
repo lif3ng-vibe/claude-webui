@@ -131,10 +131,12 @@ export class ClaudeRunner {
     // provider env 经 --settings 注入：Claude Code 用 ~/.claude/settings.json 的 env 块覆盖
     // 进程环境变量（cc-switch 靠此切换 provider），故 spawn env 注入会被覆盖。--settings CLI
     // 参数优先级更高，能盖过 settings.json。临时文件形式避免 Windows cmd.exe 解析 JSON 引号。
+    // 路径不加引号——shell:true 下手动引号会被 cmd.exe 当成路径字面字符（"file not found"）；
+    // 临时目录路径无空格，裸路径即可（含空格的用户名为已知边界情况）。
     let settingsFile: string | undefined;
     if (req.env && Object.keys(req.env).length) {
       settingsFile = await writeProviderSettings(req.env);
-      args.push('--settings', process.platform === 'win32' ? `"${settingsFile}"` : settingsFile);
+      args.push('--settings', settingsFile);
     }
 
     // Windows 上 claude 是 claude.cmd 垫片，spawn 需要 shell:true 才能解析。
@@ -168,7 +170,7 @@ export class ClaudeRunner {
     let settingsFile: string | undefined;
     if (req.env && Object.keys(req.env).length) {
       settingsFile = await writeProviderSettings(req.env);
-      args.push('--settings', process.platform === 'win32' ? `"${settingsFile}"` : settingsFile);
+      args.push('--settings', settingsFile);
     }
     const child = spawn(this.claudeBin, args, {
       cwd: req.cwd,

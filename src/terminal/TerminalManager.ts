@@ -71,7 +71,7 @@ export function createTerminalHandler(reader: ClaudeFileReader, lockSet: Set<str
     // 而非 spawn env（会被 settings.json 的 env 块覆盖）。临时文件避免 cmd.exe 解析 JSON。
     if (opts.env && Object.keys(opts.env).length) {
       settingsFile = await writeProviderSettings(opts.env);
-      args.push('--settings', process.platform === 'win32' ? `"${settingsFile}"` : settingsFile);
+      args.push('--settings', settingsFile);
     }
 
     // spawn 交互式 claude（不带 -p / --output-format，跑原生 TUI；--dangerously-skip-permissions 与单发一致）。
