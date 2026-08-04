@@ -1,5 +1,9 @@
-:root { color-scheme: dark; }
+:root { color-scheme: dark; --zoom: 1; --zoom-inv: 1; }
 html, body, #app { height: 100%; }
+/* 页面缩放（Ctrl/Cmd +/-）：#app 整体 zoom，并用 height: calc(100vh/zoom) 抵消全屏布局溢出；
+   标题栏 .titlebar 与主导航 .topnav 反向 zoom，保持原尺寸。 */
+#app { zoom: var(--zoom); height: calc(100vh / var(--zoom)); }
+.titlebar, .topnav { zoom: var(--zoom-inv); }
 body {
   margin: 0;
   background: #1a1a1a;

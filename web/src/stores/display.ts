@@ -12,5 +12,9 @@ export const useDisplayStore = defineStore('display', () => {
   const showSessionSub = useStorage('cwu-showSessionSub', true);
   const showDirTime = useStorage('cwu-showDirTime', true);
   const showCheckbox = useStorage('cwu-showCheckbox', true);
-  return { dirSort, sessionSort, showToolUse, showToolResult, showThinking, showCountBadge, showSessionSub, showDirTime, showCheckbox };
+  // 页面缩放倍数（Ctrl/Cmd +/- 调整，0 复位）；持久化。标题栏/导航不缩放。
+  const zoom = useStorage('cwu-zoom', 1);
+  // 交互浮层开关：开启后所有会话窗口显示"选项/是·否/继续"快捷应答（localStorage 跨窗口同步）。
+  const quickReply = useStorage('cwu-quickReply', false);
+  return { dirSort, sessionSort, showToolUse, showToolResult, showThinking, showCountBadge, showSessionSub, showDirTime, showCheckbox, zoom, quickReply };
 });

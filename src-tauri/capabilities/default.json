@@ -13,6 +13,7 @@
     "allow-desktop-close",
     "allow-desktop-set-always-on-top",
     "allow-desktop-is-always-on-top",
+    "allow-desktop-open-devtools",
     "allow-service-status",
     "allow-service-start",
     "allow-service-stop",

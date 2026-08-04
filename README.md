@@ -11,6 +11,8 @@
 5. **飞书机器人（远程续接 + 通知）** — 支持多个飞书应用，每个绑定一个 Claude session；在飞书发消息即续接该 session，结果以交互卡片增量流式回传；本地任务完成也推飞书。命令 `/sessions` `/use` `/info` `/new <目录>` `/stop`；白名单 + 首个发消息者自动认主 + 上线主动私聊。
 6. **多 provider 中转网关（可观测 LLM 代理）** — claude-webui 当 LLM 网关：对外 OpenAI（`/v1/chat/completions`）+ Anthropic（`/v1/messages`）双兼容，按 `model` 路由到配置的 provider，同格式字节透传 / 跨格式自动转换（含流式），每次请求的提示词与返回都可查看（「中转」tab，带测试按钮）。
 
+页面快捷键：`Ctrl/Cmd + +/-/0` 缩放页面（标题栏与主导航不缩放、倍数记忆）；`F12` / `Ctrl(Cmd)+Shift+I` 打开 DevTools（桌面壳；web 走浏览器原生）。
+
 约定见 [`CLAUDE.md`](CLAUDE.md)。
 
 ## 技术栈

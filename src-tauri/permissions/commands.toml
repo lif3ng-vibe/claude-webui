@@ -33,6 +33,11 @@ description = "允许查询置顶状态（desktop_is_always_on_top）。"
 commands.allow = ["desktop_is_always_on_top"]
 
 [[permission]]
+identifier = "allow-desktop-open-devtools"
+description = "允许打开 DevTools（desktop_open_devtools，F12 / Ctrl+Shift+I）。"
+commands.allow = ["desktop_open_devtools"]
+
+[[permission]]
 identifier = "allow-service-status"
 description = "允许查询后端状态（service_status）。"
 commands.allow = ["service_status"]

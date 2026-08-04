@@ -381,6 +381,7 @@ function setupIpc(): void {
   });
   ipcMain.on('desktop:close', () => senderFor()?.close());
   ipcMain.on('desktop:setAlwaysOnTop', (_e, v: boolean) => senderFor()?.setAlwaysOnTop(v));
+  ipcMain.on('desktop:openDevTools', () => senderFor()?.webContents.openDevTools());
   ipcMain.handle('desktop:isAlwaysOnTop', () => !!senderFor()?.isAlwaysOnTop());
 
   ipcMain.handle('service:status', () => ({

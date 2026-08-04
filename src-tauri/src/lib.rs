@@ -130,6 +130,13 @@ async fn desktop_is_always_on_top(window: tauri::WebviewWindow) -> Result<bool, 
 }
 
 #[tauri::command]
+fn desktop_open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
+    // 需 Cargo.toml 的 devtools feature（已启用，release 也可用）。
+    window.open_devtools();
+    Ok(())
+}
+
+#[tauri::command]
 async fn service_status(state: tauri::State<'_, AppState>) -> Result<ServiceStatus, String> {
     Ok(state.inner().status().await)
 }
@@ -225,7 +232,7 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             desktop_open_window, desktop_minimize, desktop_toggle_maximize,
-            desktop_close, desktop_set_always_on_top, desktop_is_always_on_top,
+            desktop_close, desktop_set_always_on_top, desktop_is_always_on_top, desktop_open_devtools,
             service_status, service_start, service_stop, service_restart, service_get_logs,
         ])
         .setup(|app| {

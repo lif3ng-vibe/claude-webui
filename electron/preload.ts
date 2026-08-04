@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('__claudeWebuiDesktop', {
   toggleMaximize: () => ipcRenderer.send('desktop:toggleMaximize'),
   close: () => ipcRenderer.send('desktop:close'),
   setAlwaysOnTop: (v: boolean) => ipcRenderer.send('desktop:setAlwaysOnTop', v),
+  openDevTools: () => ipcRenderer.send('desktop:openDevTools'),
   isAlwaysOnTop: () => ipcRenderer.invoke('desktop:isAlwaysOnTop') as Promise<boolean>,
   service: {
     status: () => ipcRenderer.invoke('service:status'),

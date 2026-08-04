@@ -27,6 +27,7 @@ export interface DesktopBridge {
   toggleMaximize(): void;
   close(): void;
   setAlwaysOnTop(v: boolean): void;
+  openDevTools(): void;
   // 两端统一异步：Electron 用 ipcRenderer.invoke，Tauri 用 invoke 命令。
   isAlwaysOnTop(): Promise<boolean>;
   service: {
