@@ -22,6 +22,7 @@ const INIT_SCRIPT: &str = r#"
     close: function(){ return invoke('desktop_close'); },
     setAlwaysOnTop: function(v){ return invoke('desktop_set_always_on_top', { v: v }); },
     isAlwaysOnTop: function(){ return invoke('desktop_is_always_on_top'); },
+    pickDirectory: function(){ return invoke('desktop_pick_directory'); },
     service: {
       status: function(){ return invoke('service_status'); },
       start: function(){ return invoke('service_start'); },
@@ -137,6 +138,13 @@ fn desktop_open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn desktop_pick_directory() -> Result<Option<String>, String> {
+    // rfd 原生文件夹选择框（无父窗口也能弹）；返回选中绝对路径或 None（取消）。
+    let handle = rfd::AsyncFileDialog::new().pick_folder().await;
+    Ok(handle.map(|h| h.path().to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 async fn service_status(state: tauri::State<'_, AppState>) -> Result<ServiceStatus, String> {
     Ok(state.inner().status().await)
 }
@@ -232,7 +240,7 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             desktop_open_window, desktop_minimize, desktop_toggle_maximize,
-            desktop_close, desktop_set_always_on_top, desktop_is_always_on_top, desktop_open_devtools,
+            desktop_close, desktop_set_always_on_top, desktop_is_always_on_top, desktop_open_devtools, desktop_pick_directory,
             service_status, service_start, service_stop, service_restart, service_get_logs,
         ])
         .setup(|app| {

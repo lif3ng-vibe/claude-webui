@@ -1,7 +1,8 @@
 :root { color-scheme: dark; --zoom: 1; --zoom-inv: 1; }
-html, body, #app { height: 100%; }
+html, body, #app { height: 100%; overflow: hidden; }
 /* 页面缩放（Ctrl/Cmd +/-）：#app 整体 zoom，并用 height: calc(100vh/zoom) 抵消全屏布局溢出；
-   标题栏 .titlebar 与主导航 .topnav 反向 zoom，保持原尺寸。 */
+   标题栏 .titlebar 与主导航 .topnav 反向 zoom，保持原尺寸。
+   overflow:hidden 兜底：页面级（整屏）不滚动，各页面内部区域自己 overflow-auto。 */
 #app { zoom: var(--zoom); height: calc(100vh / var(--zoom)); }
 .titlebar, .topnav { zoom: var(--zoom-inv); }
 body {

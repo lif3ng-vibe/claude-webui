@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import os from 'node:os';
-import { loadConfig, stripModelSuffix, publicConfig, saveProviders, resolveProvider } from '../src/config.js';
+import { loadConfig, stripModelSuffix, publicConfig, saveProviders, resolveProvider, providerEnv, matchProvider } from '../src/config.js';
 
 const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'] as const;
 let dir = '';
@@ -67,5 +67,32 @@ describe('config', () => {
     const cfg = await resolveProvider(undefined);
     expect(cfg.baseURL).toBe('http://env');
     expect(cfg.defaultModel).toBe('glm-5.2:cloud');
+  });
+
+  it('providerEnv 把 provider 解析为 claude CLI env（authToken 优先于 apiKey）', async () => {
+    await saveProviders([{ id: 'p1', name: 'P1', baseURL: 'http://x', authToken: 'tok', apiKey: 'key', model: 'm[1m]' }], 'p1');
+    const env = await providerEnv('p1');
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://x');
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe('tok');
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_MODEL).toBe('m');
+  });
+
+  it('providerEnv 无 id 回退 env', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://env';
+    process.env.ANTHROPIC_API_KEY = 'k';
+    process.env.ANTHROPIC_MODEL = 'glm[1m]';
+    const env = await providerEnv(undefined);
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://env');
+    expect(env.ANTHROPIC_API_KEY).toBe('k');
+    expect(env.ANTHROPIC_MODEL).toBe('glm');
+  });
+
+  it('matchProvider 按 id/名称/前缀匹配', async () => {
+    await saveProviders([{ id: 'p1', name: '生产', baseURL: 'http://x', authToken: 't', model: 'm' }], 'p1');
+    expect(await matchProvider('p1')).toBe('p1');
+    expect(await matchProvider('生产')).toBe('p1');
+    expect(await matchProvider('P1')).toBe('p1'); // id 前缀大小写不敏感
+    expect(await matchProvider('nope')).toBeUndefined();
   });
 });

@@ -11,8 +11,15 @@ function mockReader(projects: any[], sessions: Record<string, any[]>): ClaudeFil
   } as unknown as ClaudeFileReader;
 }
 
-function ctx(reader: ClaudeFileReader, state = new SessionState(), busy: string[] = []): CommandContext {
-  return { reader, state, busySessionIds: () => new Set(busy) };
+function ctx(
+  reader: ClaudeFileReader,
+  state = new SessionState(),
+  busy: string[] = [],
+  providers: Array<{ id: string; name?: string }> = [],
+  currentProviderId?: string,
+  matchProvider?: (q: string) => Promise<string | undefined>,
+): CommandContext {
+  return { reader, state, busySessionIds: () => new Set(busy), providers, currentProviderId, matchProvider };
 }
 
 describe('commands handleCommand', () => {
@@ -110,5 +117,29 @@ describe('commands handleCommand', () => {
   it('/new 缺目录/指令提示用法', async () => {
     expect((await handleCommand('/new', ctx(mockReader([], {})))).kind).toBe('reply-text');
     expect((await handleCommand('/new D:\\proj', ctx(mockReader([], {})))).kind).toBe('reply-text');
+  });
+
+  it('/provider 无参列出并标记当前', async () => {
+    const r = await handleCommand('/provider', ctx(mockReader([], {}), new SessionState(), [], [{ id: 'p1', name: '生产' }, { id: 'p2', name: '测试' }], 'p1'));
+    expect(r.kind).toBe('reply');
+    expect(JSON.stringify((r as { card: unknown }).card)).toContain('生产');
+    expect(JSON.stringify((r as { card: unknown }).card)).toContain('当前');
+  });
+
+  it('/provider <名称> 返回 set-provider（注入 matchProvider，不读盘）', async () => {
+    const fake = async (q: string) => (q === '测试' ? 'p2' : undefined);
+    const r = await handleCommand('/provider 测试', ctx(mockReader([], {}), new SessionState(), [], [], undefined, fake));
+    expect(r).toEqual({ kind: 'set-provider', providerId: 'p2' });
+  });
+
+  it('/provider off 清除', async () => {
+    const r = await handleCommand('/provider off', ctx(mockReader([], {})));
+    expect(r).toEqual({ kind: 'set-provider', providerId: null });
+  });
+
+  it('/provider 未命中提示', async () => {
+    const fake = async () => undefined;
+    const r = await handleCommand('/provider nope', ctx(mockReader([], {}), new SessionState(), [], [], undefined, fake));
+    expect(r.kind).toBe('reply-text');
   });
 });

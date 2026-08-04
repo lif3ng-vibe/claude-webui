@@ -23,6 +23,7 @@ interface EditApp {
   boundDir: string;
   boundSid: string;
   hasSecret: boolean;
+  providerId: string;
 }
 
 function toEdit(p: PublicFeishuApp): EditApp {
@@ -38,6 +39,7 @@ function toEdit(p: PublicFeishuApp): EditApp {
     boundDir: p.boundSession?.dirName ?? '',
     boundSid: p.boundSession?.sessionId ?? '',
     hasSecret: p.hasSecret,
+    providerId: p.providerId ?? '',
   };
 }
 
@@ -56,7 +58,7 @@ function addApp(): void {
   apps.value.push({
     id: 'app_' + Date.now(),
     name: '', appId: '', appSecret: '', allowed: '', domain: 'feishu',
-    enableNotify: true, chatIdForNotify: '', boundDir: '', boundSid: '', hasSecret: false,
+    enableNotify: true, chatIdForNotify: '', boundDir: '', boundSid: '', hasSecret: false, providerId: '',
   });
 }
 function removeApp(id: string): void {
@@ -65,6 +67,11 @@ function removeApp(id: string): void {
 
 // 绑定 session 两级选择：目录 → session。
 const dirOptions = computed(() => (projectsQuery.data.value ?? []).map((p) => ({ label: p.cwd || p.dirName, value: p.dirName })));
+// provider 选择（注入 claude env；空=env/活动兜底）。
+const providerOptions = computed(() => [
+  { label: '默认（env/活动）', value: '' },
+  ...(configQuery.data.value?.providers ?? []).map((p) => ({ label: `${p.name} · ${p.model}`, value: p.id })),
+]);
 const sessionsCache = ref<Record<string, Array<{ sessionId: string; preview: string }>>>({});
 async function ensureSessions(dir: string): Promise<void> {
   if (!dir || sessionsCache.value[dir]) return;
@@ -115,6 +122,7 @@ async function save(): Promise<void> {
     enableNotify: a.enableNotify,
     chatIdForNotify: a.chatIdForNotify || undefined,
     boundSession: a.boundDir && a.boundSid ? { dirName: a.boundDir, sessionId: a.boundSid } : null,
+    providerId: a.providerId || undefined,
   }));
   try {
     await saveFeishuApps(input);
@@ -149,6 +157,7 @@ async function save(): Promise<void> {
         <div class="row"><span class="lbl">绑定 session</span><NSelect v-model:value="a.boundSid" :options="sessionOptions(a.boundDir)" size="small" class="flex-1" :placeholder="a.boundDir ? '选择 session' : '先选目录'" :disabled="!a.boundDir" /></div>
         <div class="row"><span class="lbl">完成通知</span><NSwitch v-model:value="a.enableNotify" size="small" /></div>
         <div class="row"><span class="lbl">通知群</span><NInput v-model:value="a.chatIdForNotify" size="small" placeholder="可选；留空发本人单聊" /></div>
+        <div class="row"><span class="lbl">Provider</span><NSelect v-model:value="a.providerId" :options="providerOptions" size="small" class="flex-1" placeholder="默认（env/活动）" /></div>
       </div>
 
       <NButton size="small" dashed @click="addApp">+ 添加机器人</NButton>

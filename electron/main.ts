@@ -1,7 +1,7 @@
 // Electron 主进程：拉起 node sidecar、管理窗口/托盘、注入 desktop bridge。
 // dev：窗口指 Vite 5173，sidecar 用 tsx 跑源码（PORT=3000 对齐 Vite proxy）。
 // prod：窗口指 http://localhost:<port>/，sidecar 跑 dist-server/server.js（PORT=0，握手回传实际端口）。
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog } from 'electron';
 import { spawn, type ChildProcess, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
@@ -383,6 +383,10 @@ function setupIpc(): void {
   ipcMain.on('desktop:setAlwaysOnTop', (_e, v: boolean) => senderFor()?.setAlwaysOnTop(v));
   ipcMain.on('desktop:openDevTools', () => senderFor()?.webContents.openDevTools());
   ipcMain.handle('desktop:isAlwaysOnTop', () => !!senderFor()?.isAlwaysOnTop());
+  ipcMain.handle('desktop:pickDirectory', async () => {
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return r.canceled ? null : r.filePaths[0] ?? null;
+  });
 
   ipcMain.handle('service:status', () => ({
     running: !!sidecar && port !== null,

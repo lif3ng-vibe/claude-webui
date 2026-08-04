@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
-import { parseStreamJsonLine, streamChildEvents } from '../../src/claude/Runner.js';
+import { parseStreamJsonLine, streamChildEvents, extractSessionId } from '../../src/claude/Runner.js';
 
 describe('parseStreamJsonLine', () => {
   it('解析合法 JSON 行', () => {
@@ -37,5 +37,15 @@ describe('streamChildEvents', () => {
     const events: any[] = [];
     for await (const e of streamChildEvents(child, ac.signal)) events.push(e);
     expect(events.at(-1)).toEqual({ type: 'exit', code: null });
+  });
+});
+
+describe('extractSessionId', () => {
+  it('从 session_id / sessionId / message.sessionId 提取', () => {
+    expect(extractSessionId({ type: 'system', session_id: 'abc' })).toBe('abc');
+    expect(extractSessionId({ sessionId: 'def' })).toBe('def');
+    expect(extractSessionId({ message: { sessionId: 'ghi' } })).toBe('ghi');
+    expect(extractSessionId({ type: 'assistant' })).toBeNull();
+    expect(extractSessionId(null)).toBeNull();
   });
 });

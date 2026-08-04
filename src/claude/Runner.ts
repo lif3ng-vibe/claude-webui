@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { writeProviderSettings, delProviderSettings } from './providerSettings.js';
 
 /** 用一条指令续接一个 Claude Code session 的请求。 */
 export interface ClaudeRunRequest {
@@ -15,6 +16,8 @@ export interface ClaudeRunRequest {
   disallowedTools?: string[];
   /** 覆盖模型。 */
   model?: string;
+  /** 注入子进程的环境变量（右键选 provider / 飞书 /provider），覆盖 process.env。 */
+  env?: Record<string, string>;
   /** 中断底层进程。 */
   signal?: AbortSignal;
 }
@@ -24,6 +27,8 @@ export interface ClaudeNewRequest {
   cwd: string;
   prompt: string;
   model?: string;
+  /** 注入子进程的环境变量（右键选 provider / 飞书 /provider），覆盖 process.env。 */
+  env?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -123,6 +128,17 @@ export class ClaudeRunner {
     }
     if (req.model) args.push('--model', req.model);
 
+    // provider env 经 --settings 注入：Claude Code 用 ~/.claude/settings.json 的 env 块覆盖
+    // 进程环境变量（cc-switch 靠此切换 provider），故 spawn env 注入会被覆盖。--settings CLI
+    // 参数优先级更高，能盖过 settings.json。临时文件形式避免 Windows cmd.exe 解析 JSON 引号。
+    // 路径不加引号——shell:true 下手动引号会被 cmd.exe 当成路径字面字符（"file not found"）；
+    // 临时目录路径无空格，裸路径即可（含空格的用户名为已知边界情况）。
+    let settingsFile: string | undefined;
+    if (req.env && Object.keys(req.env).length) {
+      settingsFile = await writeProviderSettings(req.env);
+      args.push('--settings', settingsFile);
+    }
+
     // Windows 上 claude 是 claude.cmd 垫片，spawn 需要 shell:true 才能解析。
     // prompt 走 stdin 而非参数，避免 shell 注入（参数只剩 sessionId 与安全 flag）。
     // 已知限制：shell:true 下 child.kill 不一定杀掉 cmd 包裹的 node 进程，
@@ -137,7 +153,11 @@ export class ClaudeRunner {
       child.stdin.write(req.prompt);
       child.stdin.end();
     }
-    yield* streamChildEvents(child, req.signal);
+    try {
+      yield* streamChildEvents(child, req.signal);
+    } finally {
+      if (settingsFile) await delProviderSettings(settingsFile);
+    }
   }
 
   /**
@@ -147,6 +167,11 @@ export class ClaudeRunner {
   async *runNew(req: ClaudeNewRequest): AsyncGenerator<ClaudeRunEvent> {
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
     if (req.model) args.push('--model', req.model);
+    let settingsFile: string | undefined;
+    if (req.env && Object.keys(req.env).length) {
+      settingsFile = await writeProviderSettings(req.env);
+      args.push('--settings', settingsFile);
+    }
     const child = spawn(this.claudeBin, args, {
       cwd: req.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -157,7 +182,11 @@ export class ClaudeRunner {
       child.stdin.write(req.prompt);
       child.stdin.end();
     }
-    yield* streamChildEvents(child, req.signal);
+    try {
+      yield* streamChildEvents(child, req.signal);
+    } finally {
+      if (settingsFile) await delProviderSettings(settingsFile);
+    }
   }
 }
 
@@ -191,4 +220,15 @@ class AsyncQueue<T> {
       yield r.value;
     }
   }
+}
+
+/** 从 stream-json 事件提取 session_id（新建 session 后用于设为当前 / 跳转）。 */
+export function extractSessionId(d: unknown): string | null {
+  if (!d || typeof d !== 'object') return null;
+  const o = d as Record<string, unknown>;
+  if (typeof o.session_id === 'string') return o.session_id;
+  if (typeof o.sessionId === 'string') return o.sessionId;
+  const msg = o.message as Record<string, unknown> | undefined;
+  if (msg && typeof msg.sessionId === 'string') return msg.sessionId;
+  return null;
 }

@@ -1,18 +1,26 @@
 import type { ClaudeFileReader } from '../claude/FileReader.js';
 import type { SessionState, CurrentSession } from './SessionState.js';
 import type { FeishuCard } from './types.js';
+import { matchProvider } from '../config.js';
 
 export interface CommandContext {
   reader: ClaudeFileReader;
   state: SessionState;
   /** 当前被锁占用的 sessionId 集合（忙闲标记用）。 */
   busySessionIds: () => Set<string>;
+  /** 可选 provider 列表（/provider 无参时展示）。 */
+  providers?: Array<{ id: string; name?: string }>;
+  /** 当前 provider id（/provider 标记当前用）。 */
+  currentProviderId?: string;
+  /** 名称/id 匹配；默认用 config.matchProvider（读盘）。测试可注入 fake 避免读盘。 */
+  matchProvider?: (query: string) => Promise<string | undefined>;
 }
 
 export type CommandResult =
   | { kind: 'reply'; card: FeishuCard }
   | { kind: 'reply-text'; text: string }
   | { kind: 'new-session'; cwd: string; prompt: string }
+  | { kind: 'set-provider'; providerId: string | null }
   | { kind: 'stop' }
   | { kind: 'none' };
 
@@ -24,6 +32,7 @@ const HELP_TEXT = [
   '/use <序号|sessionId 前缀> — 切换当前 session',
   '/info — 查看当前 session',
   '/new <目录> <指令> — 在指定目录创建新 session',
+  '/provider [名称|id|off] — 设置本机器人使用的 provider',
   '/stop — 停止当前任务',
   '/help — 本帮助',
   '',
@@ -58,6 +67,9 @@ export async function handleCommand(text: string, ctx: CommandContext): Promise<
     case 'new':
     case 'n':
       return cmdNew(arg);
+    case 'provider':
+    case 'model':
+      return await cmdProvider(arg, ctx);
     case 'stop':
       return { kind: 'stop' };
     case 'help':
@@ -126,6 +138,24 @@ function cmdNew(arg: string): CommandResult {
   }
   if (!prompt) return { kind: 'reply-text', text: '请提供首条指令：/new <目录> <指令>' };
   return { kind: 'new-session', cwd, prompt };
+}
+
+/** /provider：无参列出；off/default 清除；<名称|id> 匹配后返回 set-provider。 */
+async function cmdProvider(arg: string, ctx: CommandContext): Promise<CommandResult> {
+  const provs = ctx.providers ?? [];
+  const cur = ctx.currentProviderId;
+  if (!arg.trim()) {
+    if (!provs.length) return { kind: 'reply-text', text: '未配置任何 provider，当前用 env 默认。' };
+    const lines = provs.map((p) => {
+      const mark = p.id === cur ? ' ✅当前' : '';
+      return `- ${p.name ?? p.id} (\`${p.id}\`)${mark}`;
+    });
+    return { kind: 'reply', card: mdCard('Provider', `当前：${cur ? `\`${cur}\`` : 'env 默认'}\n\n${lines.join('\n')}\n\n用 /provider <名称|id> 切换，/provider off 清除`, 'deep_blue') };
+  }
+  if (arg === 'off' || arg === 'default') return { kind: 'set-provider', providerId: null };
+  const id = await (ctx.matchProvider ?? matchProvider)(arg);
+  if (!id) return { kind: 'reply-text', text: `未找到匹配「${arg}」的 provider。` };
+  return { kind: 'set-provider', providerId: id };
 }
 
 function cmdInfo(ctx: CommandContext): CommandResult {

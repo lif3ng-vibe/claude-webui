@@ -10,8 +10,11 @@ import { setTitle } from '../lib/head';
 import '@xterm/xterm/css/xterm.css';
 
 const route = useRoute();
-const dir = computed(() => String(route.params.dir));
-const sid = computed(() => String(route.params.sid));
+const isNew = computed(() => route.name === 'terminal-new');
+const dir = computed(() => String(route.params.dir ?? ''));
+const sid = computed(() => String(route.params.sid ?? ''));
+const cwd = computed(() => String(route.query.cwd ?? ''));
+const provider = computed(() => (route.query.provider ? String(route.query.provider) : ''));
 
 const termEl = ref<HTMLDivElement | null>(null);
 const statusMsg = ref('');
@@ -28,7 +31,7 @@ function sendResize(): void {
 }
 
 onMounted(() => {
-  setTitle('终端 · ' + sid.value.slice(0, 8));
+  setTitle(isNew.value ? '新会话 · ' + (cwd.value || '终端') : '终端 · ' + sid.value.slice(0, 8));
   if (!termEl.value) return;
   term = new Terminal({ cursorBlink: true, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13, theme: { background: '#1a1a1a', foreground: '#ddd', cursor: '#8ab4f8' } });
   fit = new FitAddon();
@@ -60,7 +63,11 @@ onMounted(() => {
   });
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const url = `${proto}://${location.host}/api/terminal/${encodeURIComponent(dir.value)}/${encodeURIComponent(sid.value)}`;
+  const base = `${proto}://${location.host}/api/terminal`;
+  const prov = provider.value ? (isNew.value ? '&' : '?') + `provider=${encodeURIComponent(provider.value)}` : '';
+  const url = isNew.value
+    ? `${base}/new?cwd=${encodeURIComponent(cwd.value)}${prov}`
+    : `${base}/${encodeURIComponent(dir.value)}/${encodeURIComponent(sid.value)}${prov}`;
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
 

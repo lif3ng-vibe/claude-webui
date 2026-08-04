@@ -1,7 +1,9 @@
 import type { ClaudeFileReader } from '../claude/FileReader.js';
 import type { ClaudeRunEvent, ClaudeNewRequest } from '../claude/Runner.js';
+import { extractSessionId } from '../claude/Runner.js';
 import { encodeCwd } from '../claude/pathEncoding.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
+import { providerEnv } from '../config.js';
 import { handleCommand } from './commands.js';
 import { createAccumulator, toCard, Throttle } from './formatter.js';
 import { SessionState } from './SessionState.js';
@@ -27,6 +29,10 @@ export interface BotDeps {
   busySessionIds: () => Set<string>;
   /** 白名单为空时，首个发消息者被认作创建人；此回调持久化其 open_id。 */
   onFirstUser?: (openId: string) => Promise<void>;
+  /** /provider 命令改 provider 后持久化（server 注入 saveFeishuApps 封装）。 */
+  onSetProvider?: (providerId: string | null) => Promise<void>;
+  /** provider 列表（/provider 无参展示用）；server 注入 publicConfig.providers。 */
+  providers?: () => Promise<Array<{ id: string; name?: string }>>;
   /** 启动事件监听（生产用 lark.ws.Client；测试注入 mock）。handler 收已解析事件。 */
   startListener: (handler: (ev: BotMessageEvent) => void) => Promise<void>;
   stopListener?: () => Promise<void>;
@@ -104,10 +110,13 @@ export class FeishuBot {
     if (!clean) return;
 
     if (clean.startsWith('/')) {
+      const providers = await this.deps.providers?.().catch(() => []) ?? [];
       const result = await handleCommand(clean, {
         reader: this.deps.reader,
         state: this.deps.state,
         busySessionIds: this.deps.busySessionIds,
+        providers,
+        currentProviderId: this.deps.config.providerId,
       });
       if (result.kind === 'stop') {
         this.currentAbort?.abort();
@@ -116,6 +125,14 @@ export class FeishuBot {
       }
       if (result.kind === 'new-session') {
         await this.runNew(openId, result.cwd, result.prompt);
+        return;
+      }
+      if (result.kind === 'set-provider') {
+        this.deps.config.providerId = result.providerId ?? undefined;
+        try { await this.deps.onSetProvider?.(result.providerId); } catch { /* 持久化失败不阻断回复 */ }
+        await this.deps.sender
+          .sendText('open_id', openId, result.providerId ? `已切换 provider：${result.providerId}` : '已清除 provider，用 env 默认')
+          .catch(() => {});
         return;
       }
       if (result.kind === 'reply') await this.deps.sender.sendCard('open_id', openId, result.card).catch(() => {});
@@ -156,8 +173,9 @@ export class FeishuBot {
       else await sender.patchCard(messageId, card);
     };
 
+    const env = await providerEnv(this.deps.config.providerId);
     const result = await this.deps.sessionRunner.runLocked(
-      { sessionId: cur.sessionId, cwd: cur.cwd, prompt, signal: ac.signal },
+      { sessionId: cur.sessionId, cwd: cur.cwd, prompt, env, signal: ac.signal },
       {
         source: 'feishu',
         onEvent: (e: ClaudeRunEvent) => {
@@ -206,7 +224,8 @@ export class FeishuBot {
     };
 
     try {
-      for await (const ev of this.deps.runner.runNew({ cwd, prompt, signal: ac.signal })) {
+      const env = await providerEnv(this.deps.config.providerId);
+      for await (const ev of this.deps.runner.runNew({ cwd, prompt, env, signal: ac.signal })) {
         acc.accumulate(ev);
         if (!newSessionId && ev.type === 'stream-json') newSessionId = extractSessionId(ev.data);
         const t = this.now();
@@ -224,15 +243,4 @@ export class FeishuBot {
       this.currentAbort = null;
     }
   }
-}
-
-/** 从 stream-json 事件提取 session_id（新建 session 后用于设为当前）。 */
-function extractSessionId(d: unknown): string | null {
-  if (!d || typeof d !== 'object') return null;
-  const o = d as Record<string, unknown>;
-  if (typeof o.session_id === 'string') return o.session_id;
-  if (typeof o.sessionId === 'string') return o.sessionId;
-  const msg = o.message as Record<string, unknown> | undefined;
-  if (msg && typeof msg.sessionId === 'string') return msg.sessionId;
-  return null;
 }

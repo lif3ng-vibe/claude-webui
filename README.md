@@ -4,14 +4,16 @@
 
 ## 功能
 
-1. **Claude session 查看 / 续接 / 深问** — 只读 `~/.claude/projects/**`，浏览工作目录 → session → 消息时间线（markdown + 代码高亮 + 搜索）；续接 session 发指令（CLI 包裹 `claude --resume`，SSE 流式，per-sessionId 锁防分叉）；就某一步向 LLM 深问（只读磁盘工具查证）。
+1. **Claude session 查看 / 续接 / 深问** — 只读 `~/.claude/projects/**`，浏览工作目录 → session → 消息时间线（markdown + 代码高亮 + 搜索）；续接 session 发指令（CLI 包裹 `claude --resume`，SSE 流式，per-sessionId 锁防分叉）；**目录内新建会话**（桌面端原生选目录框 / web 输入路径，单发首条指令或交互式终端，建完直接跳转）；就某一步向 LLM 深问（只读磁盘工具查证）。
 2. **Anthropic 对话** — 预置系统提示词库 + 流式对话；多 provider 配置（UI 管理 + 切换），兼容任何 Anthropic 兼容代理。
 3. **网页交互终端** — 浏览器里 xterm.js 经 WebSocket 跑 `claude --resume` 的原生 TUI（node-pty）；选中 Ctrl+C 复制、Ctrl/Cmd+V 粘贴。
 4. **桌面端（Electron + Tauri 双构建）** — 同一套 web 前端，托盘保活、无边框标题栏、服务管理页；桌面端常驻即可让飞书机器人 / 中转网关一直在线。
-5. **飞书机器人（远程续接 + 通知）** — 支持多个飞书应用，每个绑定一个 Claude session；在飞书发消息即续接该 session，结果以交互卡片增量流式回传；本地任务完成也推飞书。命令 `/sessions` `/use` `/info` `/new <目录>` `/stop`；白名单 + 首个发消息者自动认主 + 上线主动私聊。
+5. **飞书机器人（远程续接 + 通知）** — 支持多个飞书应用，每个绑定一个 Claude session；在飞书发消息即续接该 session，结果以交互卡片增量流式回传；本地任务完成也推飞书。命令 `/sessions` `/use` `/info` `/new <目录>` `/provider [名称|id|off]` `/stop`；白名单 + 首个发消息者自动认主 + 上线主动私聊。
 6. **多 provider 中转网关（可观测 LLM 代理）** — claude-webui 当 LLM 网关：对外 OpenAI（`/v1/chat/completions`）+ Anthropic（`/v1/messages`）双兼容，按 `model` 路由到配置的 provider，同格式字节透传 / 跨格式自动转换（含流式），每次请求的提示词与返回都可查看（「中转」tab，带测试按钮）。
 
 页面快捷键：`Ctrl/Cmd + +/-/0` 缩放页面（标题栏与主导航不缩放、倍数记忆）；`F12` / `Ctrl(Cmd)+Shift+I` 打开 DevTools（桌面壳；web 走浏览器原生）。
+
+**右键选 provider 启动**：新建会话、续接发送、🖥 终端、📋 复制命令四个按钮都支持右键 → 选一个 provider，经 `claude --settings` 把该 provider 的 `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`MODEL` 注入这次启动（特定大模型供应商 × 本次会话上下文绑定，一次性不持久化）。用 `--settings` 而非环境变量，是因为 `~/.claude/settings.json`（cc-switch 等工具写）的 env 会覆盖进程环境变量，`--settings` 优先级更高才能盖过。左键不选 = 走 claude 自身配置（即 `~/.claude/settings.json`，cc-switch 当前选中）。
 
 约定见 [`CLAUDE.md`](CLAUDE.md)。
 

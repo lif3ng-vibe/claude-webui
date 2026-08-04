@@ -26,6 +26,8 @@ export interface FeishuApp {
   timeoutMs?: number | null;
   /** 该机器人续接的固定 session；为空则用命令切换。 */
   boundSession?: BoundSession | null;
+  /** 该机器人使用的 provider（注入 claude env）；空=env/活动兜底。由 /provider 命令设置。 */
+  providerId?: string;
 }
 
 /** 不含密钥的应用配置，供前端展示。 */
@@ -40,6 +42,7 @@ export interface PublicFeishuApp {
   hasSecret: boolean;
   timeoutMs?: number | null;
   boundSession?: BoundSession | null;
+  providerId?: string;
 }
 
 const configPath = (): string => join(configDir(), 'config.json');
@@ -66,6 +69,7 @@ function normalizeApp(raw: unknown): FeishuApp | null {
       bound && typeof bound === 'object'
         ? { dirName: String((bound as Record<string, unknown>).dirName ?? ''), sessionId: String((bound as Record<string, unknown>).sessionId ?? '') }
         : null,
+    providerId: typeof r.providerId === 'string' ? r.providerId : undefined,
   };
 }
 
@@ -98,6 +102,7 @@ export async function publicFeishuApps(): Promise<PublicFeishuApp[]> {
     hasSecret: Boolean(a.appSecret),
     timeoutMs: a.timeoutMs ?? null,
     boundSession: a.boundSession ?? null,
+    providerId: a.providerId,
   }));
 }
 
@@ -120,6 +125,7 @@ export async function saveFeishuApps(input: FeishuApp[]): Promise<void> {
       chatIdForNotify: p.chatIdForNotify !== undefined ? (p.chatIdForNotify || undefined) : old?.chatIdForNotify,
       timeoutMs: p.timeoutMs !== undefined ? p.timeoutMs : (old?.timeoutMs ?? null),
       boundSession: p.boundSession !== undefined ? (p.boundSession || null) : (old?.boundSession ?? null),
+      providerId: p.providerId !== undefined ? (p.providerId || undefined) : (old?.providerId ?? undefined),
     };
   });
   const c = await loadConfig();

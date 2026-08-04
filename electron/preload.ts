@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('__claudeWebuiDesktop', {
   setAlwaysOnTop: (v: boolean) => ipcRenderer.send('desktop:setAlwaysOnTop', v),
   openDevTools: () => ipcRenderer.send('desktop:openDevTools'),
   isAlwaysOnTop: () => ipcRenderer.invoke('desktop:isAlwaysOnTop') as Promise<boolean>,
+  pickDirectory: () => ipcRenderer.invoke('desktop:pickDirectory') as Promise<string | null>,
   service: {
     status: () => ipcRenderer.invoke('service:status'),
     start: () => ipcRenderer.invoke('service:start'),
