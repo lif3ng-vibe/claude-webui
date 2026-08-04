@@ -4,10 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, isAbsolute } from 'node:path';
 import { ClaudeFileReader } from '../claude/FileReader.js';
 import { ClaudeRunner } from '../claude/Runner.js';
+import { extractSessionId } from '../claude/Runner.js';
+import { buildResumeCommand } from '../claude/resumeCommand.js';
+import { assertSafeCwd } from '../claude/cwdGuard.js';
+import { encodeCwd } from '../claude/pathEncoding.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
 import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
-import { resolveProvider, publicConfig, saveProviders, saveGatewayKey } from '../config.js';
+import { resolveProvider, publicConfig, saveProviders, saveGatewayKey, providerEnv } from '../config.js';
 import { conversations, type Conversation, type ConvMessage } from '../conversations.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
@@ -241,8 +245,9 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, dirName: str
   res.writeHead(200, SSE_HEADERS);
   const write = sseWriter(res, req);
 
+  const env = body.providerId ? await providerEnv(String(body.providerId)) : undefined;
   const result = await sessionRunner.runLocked(
-    { sessionId, cwd, prompt, model: body.model, signal: ac.signal },
+    { sessionId, cwd, prompt, model: body.model, env, signal: ac.signal },
     {
       source: 'web',
       onEvent: (ev) => {
@@ -261,6 +266,66 @@ async function handleRun(req: IncomingMessage, res: ServerResponse, dirName: str
     if (!res.writableEnded) res.end();
   } catch {
     /* 忽略 */
+  }
+}
+
+/** 新建会话（单发 claude -p，不续接）：SSE 流式，发 created/stream-json/stderr/exit。 */
+async function handleNewSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readBody(req);
+  const cwd = String(body.cwd ?? '');
+  const prompt = String(body.prompt ?? '');
+  if (!prompt) {
+    json(res, 400, { error: 'prompt 不能为空' });
+    return;
+  }
+  try {
+    await assertSafeCwd(cwd);
+  } catch (e) {
+    json(res, 400, { error: String(e) });
+    return;
+  }
+
+  // 新建按 cwd 加锁（与新建交互终端共用 key "new:"+cwd），防同目录并发新建。
+  const lockKey = 'new:' + cwd;
+  if (runningSessions.has(lockKey)) {
+    json(res, 409, { error: '该目录正在新建会话' });
+    return;
+  }
+  runningSessions.add(lockKey);
+
+  const ac = new AbortController();
+  req.on('close', () => ac.abort());
+  res.writeHead(200, SSE_HEADERS);
+  const write = sseWriter(res, req);
+  const env = body.providerId ? await providerEnv(String(body.providerId)) : undefined;
+  let createdSent = false;
+
+  try {
+    for await (const ev of runner.runNew({ cwd, prompt, env, signal: ac.signal })) {
+      if (ev.type === 'stream-json') {
+        const sid = extractSessionId(ev.data);
+        if (sid && !createdSent) {
+          createdSent = true;
+          write(`event: created\ndata: ${JSON.stringify({ sessionId: sid, dirName: encodeCwd(cwd), cwd })}\n\n`);
+        }
+        write(`event: stream-json\ndata: ${JSON.stringify(ev.data)}\n\n`);
+      } else if (ev.type === 'stderr') {
+        write(`event: stderr\ndata: ${JSON.stringify({ text: ev.text })}\n\n`);
+      } else if (ev.type === 'exit') {
+        write(`event: exit\ndata: ${JSON.stringify({ code: ev.code })}\n\n`);
+      }
+    }
+    if (createdSent) write('event: done\ndata: {}\n\n');
+    else write(`event: error\ndata: ${JSON.stringify({ error: '未能从输出提取新 sessionId' })}\n\n`);
+  } catch (e) {
+    write(`event: error\ndata: ${JSON.stringify({ error: String(e) })}\n\n`);
+  } finally {
+    runningSessions.delete(lockKey);
+    try {
+      if (!res.writableEnded) res.end();
+    } catch {
+      /* 忽略 */
+    }
   }
 }
 
@@ -574,6 +639,18 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     if ((m = path.match(/^\/api\/projects\/([^/]+)\/sessions\/([^/]+)\/run$/)) && req.method === 'POST') {
       return await handleRun(req, res, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     }
+    if (path === '/api/sessions/new' && req.method === 'POST') {
+      return await handleNewSession(req, res);
+    }
+    if ((m = path.match(/^\/api\/projects\/([^/]+)\/sessions\/([^/]+)\/copy-command$/)) && req.method === 'GET') {
+      const dirName = decodeURIComponent(m[1]);
+      const sessionId = decodeURIComponent(m[2]);
+      const providerId = url.searchParams.get('provider') || undefined;
+      const cwd = await reader.getSessionCwd(dirName, sessionId);
+      if (!cwd) return json(res, 400, { error: '无法确定该 session 的工作目录' });
+      const env = providerId ? await providerEnv(providerId) : undefined;
+      return json(res, 200, { command: buildResumeCommand(cwd, sessionId, env) });
+    }
 
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
@@ -586,16 +663,30 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 const terminalHandler = createTerminalHandler(reader, runningSessions);
 const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
-  const m = req.url?.match(/^\/api\/terminal\/([^/]+)\/([^/]+)$/);
+  const u = new URL(req.url ?? '/', `http://localhost:${PORT}`);
+  const p = u.pathname;
+  const provider = u.searchParams.get('provider') || undefined;
+  const finish = (opts: { mode: 'resume'; dirName: string; sessionId: string; env?: Record<string, string> } | { mode: 'new'; cwd: string; env?: Record<string, string> }) => {
+    wss.handleUpgrade(req, socket, head, (ws) => terminalHandler(ws as WebSocket, opts));
+  };
+  // 新会话终端：/api/terminal/new?cwd=...&provider=...
+  if (p === '/api/terminal/new') {
+    const cwd = u.searchParams.get('cwd') || '';
+    void assertSafeCwd(cwd)
+      .then(() => providerEnv(provider))
+      .then((env) => finish({ mode: 'new', cwd, env }))
+      .catch(() => socket.destroy());
+    return;
+  }
+  // 续接终端：/api/terminal/:dir/:sid[?provider=...]
+  const m = p.match(/^\/api\/terminal\/([^/]+)\/([^/]+)$/);
   if (!m) {
     socket.destroy();
     return;
   }
   const dirName = decodeURIComponent(m[1]);
   const sessionId = decodeURIComponent(m[2]);
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    terminalHandler(ws as WebSocket, dirName, sessionId);
-  });
+  void providerEnv(provider).then((env) => finish({ mode: 'resume', dirName, sessionId, env }));
 });
 
 server.listen(PORT, () => {
