@@ -8,6 +8,8 @@ import { api, type SessionMessage } from '../api';
 import { useDisplayStore } from '../stores/display';
 import { renderContent, renderTool, renderMd, esc } from '../lib/render';
 import Icon from '../components/Icon.vue';
+import InteractionPicker from '../components/InteractionPicker.vue';
+import { useInteractionPicker } from '../composables/useInteractionPicker';
 import { iconSvg } from '../lib/icons';
 import { readSSE, type SSEEvent } from '../lib/sse';
 import { setTitle } from '../lib/head';
@@ -93,12 +95,17 @@ const studyBlocks = ref<StudyBlock[]>([]);
 let studyId = 0;
 let toolId = 0;
 
+// 交互浮层（选项/是·否/继续）：逻辑在 useInteractionPicker，显示由 display.quickReply 开关控制。
+const { picker, captureAssistant, reset: resetIX, finalize, onPick, close: closeIX } = useInteractionPicker((p) => sendPrompt(p));
+
 function appendStreamEvent(ev: SSEEvent): void {
   let html = '';
   if (ev.event === 'stream-json') {
     const d = ev.data;
-    if (d?.type === 'assistant' && d.message?.content)
+    if (d?.type === 'assistant' && d.message?.content) {
+      captureAssistant(d.message.content);
       html = `<div class="msg assistant live"><div class="role">assistant · live</div><div class="body">${renderContent(d.message.content, '', renderOpts.value)}</div></div>`;
+    }
     else if (d?.type === 'user' && d.message?.content)
       html = `<div class="msg user live"><div class="role">tool · live</div><div class="body">${renderContent(d.message.content, '', renderOpts.value)}</div></div>`;
     else if (d?.type === 'result')
@@ -118,12 +125,14 @@ function appendStreamEvent(ev: SSEEvent): void {
   }
 }
 
-async function sendPrompt(): Promise<void> {
+async function sendPrompt(override?: string): Promise<void> {
   if (runningMap.value.has(sid.value) && !confirm('该 session 正在另一个终端运行，继续可能导致分叉。仍要继续吗？')) return;
-  const prompt = promptInput.value.trim();
+  const direct = typeof override === 'string';
+  const prompt = (direct ? override : promptInput.value).trim();
   if (!prompt) return;
-  if (!confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
-  promptInput.value = '';
+  if (!direct && !confirm('将运行 claude --resume（--dangerously-skip-permissions），会真实修改该 session 及其工作目录。确认？')) return;
+  if (!direct) promptInput.value = '';
+  resetIX();
   running.value = true;
   abortCtrl.value = new AbortController();
   try {
@@ -135,6 +144,7 @@ async function sendPrompt(): Promise<void> {
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
     await readSSE(resp, appendStreamEvent);
+    finalize();
     broadcastInvalidate([['messages', dir.value, sid.value]]);
   } catch (e) {
     if ((e as Error).name !== 'AbortError') appendStreamEvent({ event: 'error', data: { error: String(e) } });
@@ -364,6 +374,7 @@ function refresh(): void {
             <NCheckbox :checked="display.showToolResult" @click="onCheck($event, 'showToolResult')">工具结果</NCheckbox>
             <NCheckbox :checked="display.showThinking" @click="onCheck($event, 'showThinking')">思考</NCheckbox>
             <NCheckbox :checked="display.showCheckbox" @click="onCheck($event, 'showCheckbox')">复选框</NCheckbox>
+            <NCheckbox :checked="display.quickReply" @click="display.quickReply = !display.quickReply" title="开启后 Claude 列出选项/问是·否/继续 时弹出可拖动浮层点选直发（所有会话窗口生效）">快捷应答浮层</NCheckbox>
           </div>
         </div>
       </NPopover>
@@ -421,13 +432,20 @@ function refresh(): void {
         v-model="promptInput"
         :disabled="running"
         placeholder="向该 session 发送指令…（skip-permissions 运行 claude --resume，Ctrl/Cmd+Enter 发送）"
-        @keydown.ctrl.enter.prevent="sendPrompt"
-        @keydown.meta.enter.prevent="sendPrompt"
+        @keydown.ctrl.enter.prevent="sendPrompt()"
+        @keydown.meta.enter.prevent="sendPrompt()"
       ></textarea>
-      <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt">发送</button>
+      <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt()">发送</button>
       <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
     </div>
     <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()"><Icon name="arrow-up" :size="18" /></button>
+    <InteractionPicker
+      v-if="picker"
+      :actions="picker.actions"
+      :title="picker.title"
+      @select="onPick"
+      @close="closeIX"
+    />
     <div
       v-if="dragRect"
       class="drag-rect"
