@@ -149,6 +149,12 @@ async function startAllFeishuApps(): Promise<void> {
         sender,
         runner,
         busySessionIds: () => new Set(runningSessions),
+        providers: async () => (await publicConfig()).providers.map((p) => ({ id: p.id, name: p.name })),
+        onSetProvider: async (providerId) => {
+          // null（off）→ 空串才能真正清除（saveFeishuApps 把 undefined 当作保留旧值）。
+          const cur = await loadFeishuApps();
+          await saveFeishuApps(cur.map((a) => (a.id === cfg.id ? { ...a, providerId: providerId === null ? '' : providerId } : a)));
+        },
         onFirstUser: async (openId) => {
           const cur = await loadFeishuApps();
           const me = cur.find((a) => a.id === cfg.id);
