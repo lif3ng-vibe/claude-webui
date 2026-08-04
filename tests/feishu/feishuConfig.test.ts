@@ -64,4 +64,19 @@ describe('feishuConfig (apps 数组)', () => {
     expect(apps).toHaveLength(1);
     expect(apps[0].id).toBe('a2');
   });
+
+  it('providerId 读写贯通 + 留空保留旧值 + public 回传', async () => {
+    await saveFeishuApps([{ id: 'a1', appId: 'cli_1', appSecret: 's1', allowedUserIds: [], domain: 'feishu', enableNotify: true, providerId: 'p1' }]);
+    let apps = await loadFeishuApps();
+    expect(apps[0].providerId).toBe('p1');
+    expect((await publicFeishuApps())[0].providerId).toBe('p1');
+    // undefined 保留旧值
+    await saveFeishuApps([{ id: 'a1', appId: 'cli_1', appSecret: '', allowedUserIds: [], domain: 'feishu', enableNotify: true }]);
+    apps = await loadFeishuApps();
+    expect(apps[0].providerId).toBe('p1');
+    // 显式空串清除
+    await saveFeishuApps([{ id: 'a1', appId: 'cli_1', appSecret: '', allowedUserIds: [], domain: 'feishu', enableNotify: true, providerId: '' }]);
+    apps = await loadFeishuApps();
+    expect(apps[0].providerId).toBeUndefined();
+  });
 });
