@@ -13,7 +13,7 @@
 
 页面快捷键：`Ctrl/Cmd + +/-/0` 缩放页面（标题栏与主导航不缩放、倍数记忆）；`F12` / `Ctrl(Cmd)+Shift+I` 打开 DevTools（桌面壳；web 走浏览器原生）。
 
-**右键选 provider 启动**：新建会话、续接发送、🖥 终端、📋 复制命令四个按钮都支持右键 → 选一个 provider，把该 provider 的 `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`MODEL` 环境变量一次性注入这次启动（特定大模型供应商 × 本次会话上下文绑定，不持久化）。左键则用默认（活动/env）provider。
+**右键选 provider 启动**：新建会话、续接发送、🖥 终端、📋 复制命令四个按钮都支持右键 → 选一个 provider，经 `claude --settings` 把该 provider 的 `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`MODEL` 注入这次启动（特定大模型供应商 × 本次会话上下文绑定，一次性不持久化）。用 `--settings` 而非环境变量，是因为 `~/.claude/settings.json`（cc-switch 等工具写）的 env 会覆盖进程环境变量，`--settings` 优先级更高才能盖过。左键不选 = 走 claude 自身配置（即 `~/.claude/settings.json`，cc-switch 当前选中）。
 
 约定见 [`CLAUDE.md`](CLAUDE.md)。
 
