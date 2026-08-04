@@ -100,8 +100,9 @@ function popDir(p: ProjectEntry): void {
 function popSession(dir: string, sid: string): void {
   openWindow(`/projects/${encodeURIComponent(dir)}/sessions/${encodeURIComponent(sid)}`);
 }
-function popTerminal(dir: string, sid: string): void {
-  openWindow(`/terminal/${encodeURIComponent(dir)}/${encodeURIComponent(sid)}`);
+function popTerminal(dir: string, sid: string, providerId?: string): void {
+  const q = providerId ? `?provider=${encodeURIComponent(providerId)}` : '';
+  openWindow(`/terminal/${encodeURIComponent(dir)}/${encodeURIComponent(sid)}${q}`);
 }
 
 function toggle(p: ProjectEntry): void {
@@ -525,7 +526,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
                 <div class="sess-head">
                   <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
                   <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)"><Icon name="copy" :size="14" /></button>
-                  <button class="icon-btn-sm" title="在终端中打开（交互式 resume）" @click.stop="popTerminal(node.p.dirName, s.sessionId)"><Icon name="terminal" :size="14" /></button>
+                  <button class="icon-btn-sm" title="在终端中打开（交互式 resume；右键选 provider）" @click.stop="popTerminal(node.p.dirName, s.sessionId)" @contextmenu.prevent="newMenu.open($event, (pid?: string) => popTerminal(node.p.dirName, s.sessionId, pid))"><Icon name="terminal" :size="14" /></button>
                   <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(node.p.dirName, s.sessionId)"><Icon name="arrow-up-right" :size="14" /></button>
                 </div>
                 <div v-if="runningMap.has(s.sessionId)" class="run-badge" :class="runningMap.get(s.sessionId)"><span class="run-dot"></span>{{ runLabel(runningMap.get(s.sessionId)) }}</div>

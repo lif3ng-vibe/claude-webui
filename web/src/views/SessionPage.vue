@@ -9,6 +9,8 @@ import { useDisplayStore } from '../stores/display';
 import { renderContent, renderTool, renderMd, esc } from '../lib/render';
 import Icon from '../components/Icon.vue';
 import InteractionPicker from '../components/InteractionPicker.vue';
+import ProviderMenu from '../components/ProviderMenu.vue';
+import { useProviderMenu } from '../composables/useProviderMenu';
 import { useInteractionPicker } from '../composables/useInteractionPicker';
 import { iconSvg } from '../lib/icons';
 import { readSSE, type SSEEvent } from '../lib/sse';
@@ -22,6 +24,7 @@ const dir = computed(() => String(route.params.dir));
 const sid = computed(() => String(route.params.sid));
 const msg = useMessage();
 const display = useDisplayStore();
+const pm = useProviderMenu();
 // 时间线显隐设置（与主页一致的 popover）
 type BoolKey = 'showToolUse' | 'showToolResult' | 'showThinking' | 'showCheckbox';
 const timelineGroup: BoolKey[] = ['showToolUse', 'showToolResult', 'showThinking', 'showCheckbox'];
@@ -69,8 +72,9 @@ function copyResume(): void {
 function popCurrent(): void {
   openWindow(`/projects/${encodeURIComponent(dir.value)}/sessions/${encodeURIComponent(sid.value)}`);
 }
-function popTerminal(): void {
-  openWindow(`/terminal/${encodeURIComponent(dir.value)}/${encodeURIComponent(sid.value)}`);
+function popTerminal(providerId?: string): void {
+  const q = providerId ? `?provider=${encodeURIComponent(providerId)}` : '';
+  openWindow(`/terminal/${encodeURIComponent(dir.value)}/${encodeURIComponent(sid.value)}${q}`);
 }
 
 const promptInput = ref('');
@@ -379,7 +383,7 @@ function refresh(): void {
         </div>
       </NPopover>
       <button class="ask" title="复制 resume 命令" @click="copyResume"><Icon name="copy" :size="13" /></button>
-      <button class="ask" title="在终端中打开（交互式 resume）" @click="popTerminal"><Icon name="terminal" :size="13" /></button>
+      <button class="ask" title="在终端中打开（交互式 resume；右键选 provider）" @click="popTerminal()" @contextmenu.prevent="pm.open($event, (pid?: string) => popTerminal(pid))"><Icon name="terminal" :size="13" /></button>
       <button class="ask popout" title="新窗口打开该 session" @click="popCurrent"><Icon name="arrow-up-right" :size="13" /></button>
       <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
       <button v-if="selectedMsgs.size" class="ask" @click="clearSelection()">取消选中</button>
@@ -451,5 +455,6 @@ function refresh(): void {
       class="drag-rect"
       :style="{ left: dragRect.x + 'px', top: dragRect.y + 'px', width: dragRect.w + 'px', height: dragRect.h + 'px' }"
     ></div>
+    <ProviderMenu :show="pm.show.value" :x="pm.x.value" :y="pm.y.value" @choose="pm.choose" @update:show="pm.show.value = $event" />
   </div>
 </template>

@@ -33,6 +33,11 @@ const routes: RouteRecordRaw[] = [
     component: ItemLayout,
     children: [{ path: '', component: TerminalPage, name: 'terminal' }],
   },
+  {
+    path: '/terminal/new',
+    component: ItemLayout,
+    children: [{ path: '', component: TerminalPage, name: 'terminal-new' }],
+  },
 ];
 
 export const router = createRouter({
@@ -61,6 +66,9 @@ router.beforeEach((to) => {
       break;
     case 'terminal':
       setHead({ title: '终端 · claude-webui', favicon: FAVICON.session });
+      break;
+    case 'terminal-new':
+      setHead({ title: '新会话 · 终端', favicon: FAVICON.session });
       break;
   }
 });
