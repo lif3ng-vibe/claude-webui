@@ -114,7 +114,7 @@ function runTerminal(pid?: string): void {
             <button
               v-for="p in dirOptions"
               :key="p.dirName"
-              class="text-left px-2 py-1 rounded hover:bg-[#ffffff14] truncate text-[13px]"
+              class="text-left px-2 py-1 rounded hover:bg-[#ffffff14] truncate text-[13px] shrink-0"
               :title="p.cwd"
               @click="pickProjectDir(p)"
             >{{ p.cwd }}</button>
