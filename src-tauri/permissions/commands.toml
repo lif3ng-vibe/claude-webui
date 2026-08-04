@@ -38,6 +38,11 @@ description = "允许打开 DevTools（desktop_open_devtools，F12 / Ctrl+Shift+
 commands.allow = ["desktop_open_devtools"]
 
 [[permission]]
+identifier = "allow-desktop-pick-directory"
+description = "允许打开系统文件夹选择框（desktop_pick_directory，新建会话选目录）。"
+commands.allow = ["desktop_pick_directory"]
+
+[[permission]]
 identifier = "allow-service-status"
 description = "允许查询后端状态（service_status）。"
 commands.allow = ["service_status"]

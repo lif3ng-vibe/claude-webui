@@ -30,6 +30,8 @@ export interface DesktopBridge {
   openDevTools(): void;
   // 两端统一异步：Electron 用 ipcRenderer.invoke，Tauri 用 invoke 命令。
   isAlwaysOnTop(): Promise<boolean>;
+  /** 系统文件夹选择框；返回选中绝对路径或 null（取消）。 */
+  pickDirectory(): Promise<string | null>;
   service: {
     status(): Promise<ServiceStatus>;
     start(): Promise<void>;
@@ -86,4 +88,12 @@ export function toggleMaximize(): void {
 
 export function closeWindow(): void {
   desktop?.close();
+}
+
+/**
+ * 选目录：桌面端弹系统文件夹选择框；web 下回退 null（调用方转输入框）。
+ */
+export async function pickDirectory(): Promise<string | null> {
+  if (desktop) return desktop.pickDirectory();
+  return null;
 }
