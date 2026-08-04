@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { FeishuBot } from '../../src/feishu/Bot.js';
 import { SessionRunner } from '../../src/claude/SessionRunner.js';
 import { SessionState } from '../../src/feishu/SessionState.js';
-import type { ClaudeRunEvent, ClaudeRunRequest } from '../../src/claude/Runner.js';
+import type { ClaudeRunEvent, ClaudeRunRequest, ClaudeNewRequest } from '../../src/claude/Runner.js';
 import type { FeishuSender } from '../../src/feishu/types.js';
 import type { FeishuApp } from '../../src/feishu/feishuConfig.js';
 import type { ClaudeFileReader } from '../../src/claude/FileReader.js';
@@ -24,7 +24,7 @@ function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unkno
   return { sender, calls };
 }
 
-function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string } } = {}) {
+function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string }; providerId?: string; onSetProvider?: (id: string | null) => Promise<void> } = {}) {
   const { sender, calls } = mockSender();
   const lock = opts.lock ?? new Set<string>();
   const events =
@@ -39,18 +39,16 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]
       { type: 'stream-json', data: { type: 'system', session_id: 'new-sess' } },
       { type: 'exit', code: 0 },
     ];
+  const capturedNew: ClaudeNewRequest[] = [];
+  const capturedRun: ClaudeRunRequest[] = [];
   const fakeRunner = {
-    async *run(_req: ClaudeRunRequest): AsyncGenerator<ClaudeRunEvent> {
-      for (const e of events) yield e;
-    },
-    async *runNew(): AsyncGenerator<ClaudeRunEvent> {
-      for (const e of newEvents) yield e;
-    },
+    async *run(rq: ClaudeRunRequest): AsyncGenerator<ClaudeRunEvent> { capturedRun.push(rq); for (const e of events) yield e; },
+    async *runNew(rq: ClaudeNewRequest): AsyncGenerator<ClaudeRunEvent> { capturedNew.push(rq); for (const e of newEvents) yield e; },
   };
   const sessionRunner = new SessionRunner(fakeRunner, lock);
   const state = new SessionState(() => 1000);
   if (opts.current) state.set(opts.current);
-  const cfg: FeishuApp = { id: 'a1', appId: 'a', appSecret: 's', allowedUserIds: opts.allowed ? [...opts.allowed] : ['ou_me'], domain: 'feishu', enableNotify: true, boundSession: opts.boundSession };
+  const cfg: FeishuApp = { id: 'a1', appId: 'a', appSecret: 's', allowedUserIds: opts.allowed ? [...opts.allowed] : ['ou_me'], domain: 'feishu', enableNotify: true, boundSession: opts.boundSession, providerId: opts.providerId };
   const onFirstCalls: string[] = [];
   const reader = { listProjects: async () => [], listSessions: async () => [], getSessionCwd: async () => '/p' } as unknown as ClaudeFileReader;
   const bot = new FeishuBot({
@@ -66,8 +64,10 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]
     onFirstUser: async (id: string) => {
       onFirstCalls.push(id);
     },
+    providers: async () => [],
+    onSetProvider: opts.onSetProvider,
   });
-  return { bot, calls, state, lock, cfg, onFirstCalls };
+  return { bot, calls, state, lock, cfg, onFirstCalls, capturedNew, capturedRun };
 }
 
 describe('FeishuBot handleMessage', () => {
@@ -160,5 +160,29 @@ describe('FeishuBot handleMessage', () => {
     expect(state.current()?.sessionId).toBe('new-xyz');
     expect(state.current()?.cwd).toBe('D:\\proj');
     expect(calls.some((c) => c.m === 'sendCard')).toBe(true);
+  });
+
+  it('runNew 注入 app.providerId 的 env', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://env';
+    const { bot, capturedNew } = makeBot({ providerId: 'p1' });
+    await bot.handleMessage({ openId: 'ou_me', text: '/new D:\\proj hi', isMention: false });
+    expect(capturedNew[0]?.env).toBeTruthy();
+    expect(capturedNew[0]?.env?.ANTHROPIC_BASE_URL).toBe('http://env');
+    delete process.env.ANTHROPIC_BASE_URL;
+  });
+
+  it('续接注入 app.providerId 的 env', async () => {
+    process.env.ANTHROPIC_BASE_URL = 'http://env';
+    const { bot, capturedRun } = makeBot({ providerId: 'p1', current: { sessionId: 'abc-12345', dirName: 'd', cwd: '/p' } });
+    await bot.handleMessage({ openId: 'ou_me', text: '请修复', isMention: false });
+    expect(capturedRun[0]?.env?.ANTHROPIC_BASE_URL).toBe('http://env');
+    delete process.env.ANTHROPIC_BASE_URL;
+  });
+
+  it('/provider off 触发 onSetProvider(null)', async () => {
+    const onSet: Array<string | null> = [];
+    const { bot } = makeBot({ onSetProvider: async (id) => { onSet.push(id); } });
+    await bot.handleMessage({ openId: 'ou_me', text: '/provider off', isMention: false });
+    expect(onSet).toEqual([null]);
   });
 });
