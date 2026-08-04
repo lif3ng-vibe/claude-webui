@@ -5,7 +5,7 @@ import { refDebounced } from '@vueuse/core';
 import { NInput, NSpin, NEmpty, NSelect, NPopover, NCheckbox, useMessage } from 'naive-ui';
 import { useSessionStore } from '../stores/session';
 import { useDisplayStore } from '../stores/display';
-import { api, type ProjectEntry, type SessionEntry } from '../api';
+import { api, copyCommand, type ProjectEntry, type SessionEntry } from '../api';
 import { renderContent, renderTool, renderMd, hl, fmtBytes, fmtTime, esc } from '../lib/render';
 import Icon from './Icon.vue';
 import InteractionPicker from './InteractionPicker.vue';
@@ -45,8 +45,15 @@ function runLabel(s?: string): string {
 const msg = useMessage();
 const showNew = ref(false);
 const newMenu = useProviderMenu();
-function copyResume(cwd: string, sid: string): void {
+function copyResume(dirName: string, cwd: string, sid: string, providerId?: string): void {
   if (runningMap.value.has(sid) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
+  if (providerId) {
+    if (!confirm('复制将包含该 provider 的密钥（ANTHROPIC_AUTH_TOKEN），确认？')) return;
+    copyCommand(dirName, sid, providerId)
+      .then((cmd) => navigator.clipboard.writeText(cmd).then(() => msg.success('已复制含 provider 的 resume 命令')))
+      .catch(() => msg.error('复制失败'));
+    return;
+  }
   navigator.clipboard
     .writeText(`cd "${cwd}" && claude --resume ${sid}`)
     .then(() => msg.success('已复制：cd 到目录并 resume'))
@@ -222,7 +229,7 @@ function appendStreamEvent(ev: SSEEvent): void {
 
 // 交互抽取（textOfContent/extractOptions/是·否/继续/extractInteractions）见 composables/useInteractionPicker。
 
-async function sendPrompt(override?: string): Promise<void> {
+async function sendPrompt(override?: string, providerId?: string): Promise<void> {
   if (!store.dirName || !store.sessionId) return;
   if (runningMap.value.has(store.sessionId) && !confirm('该 session 正在另一个终端运行，继续可能导致分叉。仍要继续吗？')) return;
   const direct = typeof override === 'string';
@@ -238,7 +245,7 @@ async function sendPrompt(override?: string): Promise<void> {
     const resp = await fetch(`/api/projects/${store.dirName}/sessions/${store.sessionId}/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, providerId }),
       signal: abortCtrl.value.signal,
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
@@ -525,7 +532,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
               >
                 <div class="sess-head">
                   <div class="title" :title="s.preview || s.sessionId.slice(0, 8)" v-html="hl(s.preview || s.sessionId.slice(0, 8), q)" />
-                  <button class="icon-btn-sm" title="复制 resume 命令" @click.stop="copyResume(node.p.cwd, s.sessionId)"><Icon name="copy" :size="14" /></button>
+                  <button class="icon-btn-sm" title="复制 resume 命令（右键选 provider）" @click.stop="copyResume(node.p.dirName, node.p.cwd, s.sessionId)" @contextmenu.prevent="newMenu.open($event, (pid?: string) => copyResume(node.p.dirName, node.p.cwd, s.sessionId, pid))"><Icon name="copy" :size="14" /></button>
                   <button class="icon-btn-sm" title="在终端中打开（交互式 resume；右键选 provider）" @click.stop="popTerminal(node.p.dirName, s.sessionId)" @contextmenu.prevent="newMenu.open($event, (pid?: string) => popTerminal(node.p.dirName, s.sessionId, pid))"><Icon name="terminal" :size="14" /></button>
                   <button class="icon-btn-sm popout" title="新窗口打开该 session" @click.stop="popSession(node.p.dirName, s.sessionId)"><Icon name="arrow-up-right" :size="14" /></button>
                 </div>
@@ -597,7 +604,7 @@ const renderOpts = computed(() => ({ toolUse: display.showToolUse, toolResult: d
           @keydown.ctrl.enter.prevent="sendPrompt()"
           @keydown.meta.enter.prevent="sendPrompt()"
         ></textarea>
-        <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt()">发送</button>
+        <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt()" @contextmenu.prevent="newMenu.open($event, (pid?: string) => sendPrompt(undefined, pid))">发送</button>
         <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
       </div>
       <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()"><Icon name="arrow-up" :size="18" /></button>

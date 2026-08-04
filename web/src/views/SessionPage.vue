@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useQuery } from '@tanstack/vue-query';
 import { refDebounced } from '@vueuse/core';
 import { NInput, NSpin, NCheckbox, NPopover, NSelect, useMessage } from 'naive-ui';
-import { api, type SessionMessage } from '../api';
+import { api, copyCommand, type SessionMessage } from '../api';
 import { useDisplayStore } from '../stores/display';
 import { renderContent, renderTool, renderMd, esc } from '../lib/render';
 import Icon from '../components/Icon.vue';
@@ -63,8 +63,15 @@ watch(
 const runningQuery = useQuery({ queryKey: ['running'], queryFn: api.running, refetchInterval: 3000 });
 const runningMap = computed(() => new Map((runningQuery.data.value ?? []).map((r) => [r.sessionId, r.status])));
 
-function copyResume(): void {
+function copyResume(providerId?: string): void {
   if (runningMap.value.has(sid.value) && !confirm('该 session 正在另一个终端运行，在另一终端 resume 可能导致分叉。仍要复制命令吗？')) return;
+  if (providerId) {
+    if (!confirm('复制将包含该 provider 的密钥（ANTHROPIC_AUTH_TOKEN），确认？')) return;
+    copyCommand(dir.value, sid.value, providerId)
+      .then((cmd) => navigator.clipboard.writeText(cmd).then(() => msg.success('已复制含 provider 的 resume 命令')))
+      .catch(() => msg.error('复制失败'));
+    return;
+  }
   // cwd 未知时退化为占位；用户在 resume 命令里自行替换
   navigator.clipboard.writeText(`claude --resume ${sid.value}`).then(() => msg.success('已复制 resume 命令')).catch(() => msg.error('复制失败'));
 }
@@ -129,7 +136,7 @@ function appendStreamEvent(ev: SSEEvent): void {
   }
 }
 
-async function sendPrompt(override?: string): Promise<void> {
+async function sendPrompt(override?: string, providerId?: string): Promise<void> {
   if (runningMap.value.has(sid.value) && !confirm('该 session 正在另一个终端运行，继续可能导致分叉。仍要继续吗？')) return;
   const direct = typeof override === 'string';
   const prompt = (direct ? override : promptInput.value).trim();
@@ -143,7 +150,7 @@ async function sendPrompt(override?: string): Promise<void> {
     const resp = await fetch(`/api/projects/${dir.value}/sessions/${sid.value}/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, providerId }),
       signal: abortCtrl.value.signal,
     });
     if (!resp.ok || !resp.body) throw new Error(await resp.text().catch(() => `HTTP ${resp.status}`));
@@ -382,7 +389,7 @@ function refresh(): void {
           </div>
         </div>
       </NPopover>
-      <button class="ask" title="复制 resume 命令" @click="copyResume"><Icon name="copy" :size="13" /></button>
+      <button class="ask" title="复制 resume 命令（右键选 provider）" @click="copyResume()" @contextmenu.prevent="pm.open($event, (pid?: string) => copyResume(pid))"><Icon name="copy" :size="13" /></button>
       <button class="ask" title="在终端中打开（交互式 resume；右键选 provider）" @click="popTerminal()" @contextmenu.prevent="pm.open($event, (pid?: string) => popTerminal(pid))"><Icon name="terminal" :size="13" /></button>
       <button class="ask popout" title="新窗口打开该 session" @click="popCurrent"><Icon name="arrow-up-right" :size="13" /></button>
       <button v-if="selectedMsgs.size" class="ask" @click="askSelected()">提问选中({{ selectedMsgs.size }})</button>
@@ -439,7 +446,7 @@ function refresh(): void {
         @keydown.ctrl.enter.prevent="sendPrompt()"
         @keydown.meta.enter.prevent="sendPrompt()"
       ></textarea>
-      <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt()">发送</button>
+      <button class="send" :disabled="running || !promptInput.trim()" @click="sendPrompt()" @contextmenu.prevent="pm.open($event, (pid?: string) => sendPrompt(undefined, pid))">发送</button>
       <button v-if="running" class="stop" @click="abortCtrl?.abort()">停止</button>
     </div>
     <button v-if="showTopBtn" class="back-top" title="回到顶部" @click="scrollToTop()"><Icon name="arrow-up" :size="18" /></button>
