@@ -92,6 +92,16 @@
 - 跨窗口状态同步：BroadcastChannel 广播 mutation → 其他窗口 `queryClient.invalidateQueries` 重新拉；`/api/running` 忙/闲由 3s 轮询驱动天然跨窗口一致。
 - 桌面端兼容：客户端启动拉起本地 node server（serve 前端 + SPA fallback + `/api`），窗口加载 `http://localhost:<port>/`，history 模式白拿；title 映射 OS 窗口标题，favicon 无标签页则降级。
 
+### 4.11 目录内新建会话 + 右键选 provider 启动
+
+- **目录内新建会话**（不是 resume）：`+ 新会话` 按钮（左侧栏 header + DirPage header）弹 `NewSessionDialog`——选工作目录（桌面端 `pickDirectory` 原生文件夹框，web 回退输入绝对路径）+ 模式（单发首条指令 / 交互式终端）。
+  - 单发：`POST /api/sessions/new`（SSE）跑 `claude -p`（不带 `--resume`），从 stream-json 提取新 sessionId，发 `created {sessionId, dirName=encodeCwd(cwd), cwd}` 事件，前端 `router.push` 直接跳到新 session 时间线 + 跨窗口失效 projects/sessions。按 `"new:"+cwd` 锁（与新建终端共用，防同目录并发）。
+  - 交互式终端：`openWindow('/terminal/new?cwd=…')`，`TerminalPage` 连 `WS /api/terminal/new?cwd=` 跑 fresh `claude`（不带 `--resume`）；新 session 不提取 sid，靠 `/api/projects` 轮询刷新自然出现。
+- **右键选 provider 启动**（一次性绑定，不持久化）：`providerEnv(id)` 把 provider 解析为 Claude CLI env（`ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`API_KEY`/`MODEL`），merge 进 `ClaudeRunner.run`/`runNew` 的 spawn env 覆盖 `process.env`。四个按钮支持右键 → `useProviderMenu`/`ProviderMenu` 选 provider：
+  - `+ 新会话`（右键预置 provider 进对话框）、续接 `发送`（`/run` body 带 providerId）、🖥 终端（URL `?provider=`）、📋 复制命令（`GET /api/projects/:dir/sessions/:sid/copy-command?provider=`，后端 `buildResumeCommand` 生成含 env 的 bash 命令，前端无密钥；弹确认含 token）。
+  - 左键 = 默认（活动/env）provider。
+- **飞书 provider**（应用级持久化，是该一次性规则的例外）：`FeishuApp.providerId` + `/provider [名称|id|off]` 命令；`/new` 与续接都注入 `providerEnv(app.providerId)`。`matchProvider` 按名称/id 匹配。
+
 ## 5. 读取/展示范围
 
 只读 `~/.claude/projects/**` + `~/.claude/sessions/**`（运行状态）。`history.jsonl`/`stats-cache.json`/`memory/`/`settings*`/`mcp.json`/`plans`/`tasks` 全部 defer。
@@ -151,11 +161,14 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 | GET | `/api/projects` | 工作目录列表（含 latestMtimeMs） |
 | GET | `/api/projects/:dir/sessions` | session 列表 |
 | GET | `/api/projects/:dir/sessions/:sid/messages` | 消息时间线 |
-| POST | `/api/projects/:dir/sessions/:sid/run` | 续接（SSE） |
+| POST | `/api/projects/:dir/sessions/:sid/run` | 续接（SSE；body 可带 `providerId`） |
+| POST | `/api/sessions/new` | **新建会话**（SSE，§4.11；body `{cwd,prompt,providerId?}`，发 `created`/`stream-json`/`stderr`/`exit`） |
+| GET | `/api/projects/:dir/sessions/:sid/copy-command` | 复制 resume 命令（`?provider=` 时返回含 env 的命令，§4.11） |
 | POST | `/api/chat` | 对话（SSE） |
 | POST | `/api/study` | 深问（SSE，含 request/messages 事件） |
 | GET | `/api/running` | 运行中会话状态 |
-| WS | `/api/terminal/:dir/:sid` | 网页交互终端（WebSocket + node-pty，§11；二进制=终端 IO，文本=resize/exit/error） |
+| WS | `/api/terminal/:dir/:sid` | 网页交互终端（WebSocket + node-pty，§11；`?provider=` 注入；二进制=终端 IO，文本=resize/exit/error） |
+| WS | `/api/terminal/new` | **新建会话终端**（`?cwd=&provider=`，§4.11/§11；fresh claude 不带 --resume） |
 
 ## 8. 运行
 
@@ -220,8 +233,8 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 
 在浏览器里用 xterm.js 经 WebSocket 连后端 node-pty 跑 `claude --resume <sid> --dangerously-skip-permissions` 的交互式 TUI，能 `/命令`、实时来回——区别于 §4.2 的单发续接（`-p` 一次性 stream-json）。两套并存、共享 per-sessionId 锁（`runningSessions`）互斥。
 
-- **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。
-- **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。
+- **后端**：`src/terminal/TerminalManager.ts` 的 `createTerminalHandler(reader, lockSet)`：解析 cwd（`reader.getSessionCwd`）→ 锁检查（占用则 close 4001）→ node-pty spawn（Windows `cmd.exe /c claude`，其它直接 `claude`）→ PTY 输出按二进制帧发 WS、WS 二进制写入 PTY、文本帧 `{type:'resize',cols,rows}` 调 `pty.resize`；WS 关 → kill PTY + 释放锁（断开即杀）。`src/server/index.ts` 挂 `WebSocketServer({noServer})` + `server.on('upgrade')` 路由 `/api/terminal/:dir/:sid`。`ws` 纯 JS 打进 bundle，`node-pty` 原生模块 esbuild `external`。**§4.11 扩展**：`createTerminalHandler` 返回的处理器改判别联合 `(ws, opts)`——`{mode:'resume',dirName,sessionId}` 或 `{mode:'new',cwd}`，均带可选 `env`（provider 注入）；`spawnSpec(opts)` 纯函数推导 args/lockKey（resume 按 sid、new 按 `"new:"+cwd`）；upgrade 路由增 `/api/terminal/new?cwd=&provider=`（fresh claude）与 `?provider=` query（resume）。
+- **前端**：`web/src/views/TerminalPage.vue`（xterm + FitAddon + `useResizeObserver`）连 `${ws|wss}://${host}/api/terminal/<dir>/<sid>`；路由 `/terminal/:dir/:sid`（ItemLayout shell）；SessionsView session 行 + SessionPage header 加 🖥 按钮 `popTerminal` → `openWindow('/terminal/...')`。Vite dev proxy 加 `ws:true` 代理 WS 升级。**新建会话终端**（§4.11）：路由 `/terminal/new?cwd=&provider=`，TerminalPage 按 `route.name==='terminal-new'` 连 `/api/terminal/new?cwd=`（fresh claude）；`popTerminal(dir,sid,providerId?)` 与 🖥 右键选 provider 透传 `?provider=`。
 - **协议**：C→S 二进制=终端输入（UTF-8），文本=`{type:'resize'}`；S→C 二进制=PTY 输出，文本=`{type:'exit'|'error'}`。前端 xterm 拦截 Ctrl+C（有选中则复制剪贴板，无选中放行中断）+ Ctrl/Cmd+V（粘贴剪贴板到 pty）。
 - **桌面打包 node-pty**：node-pty 1.x 用 N-API 稳定 ABI，**预编译按平台且随 npm 包自带所有平台**（`prebuilds/{darwin-arm64,darwin-x64,win32-*}`），按需下载的 Node 22 直接兼容，无需匹配 Node ABI、无需跨 arch 抓取。Electron 靠 electron-builder `files: node_modules/**` 自动带；Tauri 把 `node_modules/node-pty` 作 `bundle.resources` 随包，sidecar（ESM bundle）的 `import 'node-pty'` 经**标准 node_modules 向上查找**解析（`<resource_dir>/dist-server/server.js` → `<resource_dir>/node_modules/node-pty`）。⚠️ ESM 的 `import` **不读 `NODE_PATH`**（那是 CJS `require` 专属），sidecar 里设的 `NODE_PATH` 实际不参与解析、只是冗余保留——真正起作用的是平铺的资源布局。
 - **资源平铺（坑，曾导致安装后主窗口不显示）**：`tauri.conf.json` 的 `bundle.resources` 若用带 `../` 的字符串路径（如 `"../dist-server"`），Tauri 会把 `..` 编码成字面子目录 `_up_/`，运行时 `resource_dir().join("dist-server")` 就找不到 server.js → sidecar 拿不到端口 → **主窗口从不创建**（且 `windows_subsystem="windows"` 下日志不可见，表现为静默无窗口）。修法：改用 **map 形式**（`BundleResources` 只认「字符串数组」或「source→target map」，**不支持** `{src,target}` 对象数组——后者会让 `tauri build` 在配置解析阶段直接失败）。即 `resources: { "../dist-server": "dist-server/", "../web/dist": "web/dist/", "../node_modules/node-pty": "node_modules/node-pty/" }`，source 带 `../`、target 平铺，资源落到 `resource_dir` 下、无 `_up_`。
@@ -237,7 +250,7 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **共享重构**：`src/claude/SessionRunner.ts` 把「锁→runner→lifecycle」抽成共享驱动器，web SSE、飞书卡片、本地通知都经此；`onFinished` 钩子供通知订阅（`source!=='feishu' && enableNotify && !aborted` 推送）。锁仍是同一个 `runningSessions` Set，web/终端/飞书三方互斥。
 - **端点**：`GET /api/config` 带 `publicFeishuApps`（数组，不回 secret）；`PUT /api/feishu/config`（存 apps 数组并重启所有 bot，不动 providers）；`GET /api/feishu/status`（`{apps:[{id,name,appId,state}]}`）；`POST /api/feishu/restart`。
 - **配置**（`~/.claude-webui/config.json` 的 `feishu.apps` 数组）：每个应用 `{id, name, appId, appSecret, allowedUserIds, domain(feishu|lark), enableNotify, chatIdForNotify, timeoutMs, boundSession:{dirName,sessionId}}`。旧的单 `feishu:{appId,...}` 自动迁移为 `apps[0]`。secret 留空保留旧值。
-- **命令**：`/sessions` `/use` `/info` `/new <目录> <指令>` `/stop` `/help`；纯文本续接当前 session。`/new` 在指定 cwd 创建新 session（`claude -p`，不带 `--resume`），从 stream-json 提取新 sessionId 设为当前。
+- **命令**：`/sessions` `/use` `/info` `/new <目录> <指令>` `/provider [名称|id|off]` `/stop` `/help`；纯文本续接当前 session。`/new` 在指定 cwd 创建新 session（`claude -p`，不带 `--resume`），从 stream-json 提取新 sessionId 设为当前。`/provider` 设/清应用级 provider（`FeishuApp.providerId`，`matchProvider` 按名称/id 匹配），`/new` 与续接都注入 `providerEnv(app.providerId)`。
 - **回传**：续接结果 create 一张交互卡片 → stream-json 累加（按 message uuid 去重取最新 content）→ 节流 `im.message.patch`（~1.2s）→ 收尾定稿；正文超长折叠；工具调用/结果用 markdown 代码块。
 - **前端**：`FeishuSettings.vue`（appId/secret/白名单/domain/通知开关/chat_id 表单 + 在线状态 3s 轮询徽标），挂在设置弹窗（与 `ProviderSettings` 并列）。
 - **打包**：`@larksuiteoapi/node-sdk`（纯 JS，含 axios/protobufjs/lodash/qs）esbuild 打进 `dist-server/server.js`（~6.3MB）。

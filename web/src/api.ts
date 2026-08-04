@@ -54,6 +54,7 @@ export interface PublicFeishuApp {
   hasSecret: boolean;
   timeoutMs?: number | null;
   boundSession?: BoundSession | null;
+  providerId?: string;
 }
 
 export interface FeishuAppInput {
@@ -67,6 +68,7 @@ export interface FeishuAppInput {
   chatIdForNotify?: string;
   timeoutMs?: number | null;
   boundSession?: BoundSession | null;
+  providerId?: string;
 }
 
 export interface FeishuAppStatus {
