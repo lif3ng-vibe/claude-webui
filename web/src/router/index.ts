@@ -7,12 +7,14 @@ import SessionPage from '../views/SessionPage.vue';
 import ConversationPage from '../views/ConversationPage.vue';
 import ServicePage from '../views/ServicePage.vue';
 import TerminalPage from '../views/TerminalPage.vue';
+import WorkspaceView from '../views/WorkspaceView.vue';
 
 // 主页 / 不走路由切换（Sessions/Chat 仍由 Pinia ui.view 驱动）；
 // 下列三项为精简单页 shell（独立窗口），父子可下钻。
 const routes: RouteRecordRaw[] = [
   { path: '/', component: MainApp, name: 'home' },
   { path: '/service', component: ServicePage, name: 'service' },
+  { path: '/workspace', component: WorkspaceView, name: 'workspace' },
   {
     path: '/projects/:dir',
     component: ItemLayout,
@@ -54,6 +56,9 @@ router.beforeEach((to) => {
       break;
     case 'service':
       setHead({ title: '服务 · claude-webui', favicon: FAVICON.home });
+      break;
+    case 'workspace':
+      setHead({ title: '终端工作区 · claude-webui', favicon: FAVICON.session });
       break;
     case 'dir':
       setHead({ title: 'Sessions · claude-webui', favicon: FAVICON.dir });
