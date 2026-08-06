@@ -1,4 +1,6 @@
 import { readSSE, type SSEEvent } from './lib/sse';
+import type { TabDescriptor, TabGroupNode, SplitNode, LayoutNode, WorkspaceState } from './lib/workspace/types';
+export type { TabDescriptor, TabGroupNode, SplitNode, LayoutNode, WorkspaceState };
 
 export interface ProjectEntry {
   dirName: string;
@@ -13,6 +15,8 @@ export interface SessionEntry {
   mtimeMs: number;
   size: number;
   preview: string;
+  /** 最新 AI 标题（jsonl 最后一条 type:"ai-title"）；无则空串。 */
+  title?: string;
 }
 
 export interface SessionMessage {
@@ -257,4 +261,26 @@ export async function saveConversation(c: Partial<Conversation> & { id: string; 
 export async function deleteConversation(id: string): Promise<void> {
   const r = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+
+// —— 终端工作区 ——
+/** 读取持久化的终端工作区布局。 */
+export async function getWorkspace(): Promise<WorkspaceState> {
+  return getJSON<WorkspaceState>('/api/workspace');
+}
+/** 保存终端工作区布局（后端会再校验一遍）。 */
+export async function saveWorkspace(state: WorkspaceState): Promise<WorkspaceState> {
+  const r = await fetch('/api/workspace', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(state),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+/** 单 session 的最新 AI 标题（轮询刷新标签名用）。 */
+export async function sessionTitle(dir: string, sid: string): Promise<string> {
+  const r = await fetch(`/api/projects/${dir}/sessions/${sid}/title`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return ((await r.json()) as { title: string }).title;
 }
