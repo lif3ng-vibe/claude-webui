@@ -56,4 +56,58 @@ describe('ClaudeFileReader', () => {
     expect(await reader.listProjects()).toEqual([]);
     expect(await reader.listSessions('does-not-exist')).toEqual([]);
   });
+
+  describe('readLatestTitle', () => {
+    it('returns the last ai-title line of a session', async () => {
+      const dirName = 'C--Users-lif3n-src-demo';
+      const sessionId = 's-title';
+      const projectsDir = join(tmp, 'projects', dirName);
+      await mkdir(projectsDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' }, sessionId }),
+        JSON.stringify({ type: 'ai-title', aiTitle: '任务A', sessionId }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant' }, sessionId }),
+        JSON.stringify({ type: 'ai-title', aiTitle: '任务B-最新', sessionId }),
+      ];
+      await writeFile(join(projectsDir, `${sessionId}.jsonl`), lines.join('\n') + '\n');
+
+      const reader = new ClaudeFileReader(tmp);
+      expect(await reader.readLatestTitle(dirName, sessionId)).toBe('任务B-最新');
+    });
+
+    it('returns empty string when there is no ai-title line', async () => {
+      const dirName = 'C--Users-lif3n-src-demo';
+      const sessionId = 's-notitle';
+      const projectsDir = join(tmp, 'projects', dirName);
+      await mkdir(projectsDir, { recursive: true });
+      await writeFile(
+        join(projectsDir, `${sessionId}.jsonl`),
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' }, sessionId }) + '\n',
+      );
+      const reader = new ClaudeFileReader(tmp);
+      expect(await reader.readLatestTitle(dirName, sessionId)).toBe('');
+    });
+
+    it('returns empty string for a missing session file', async () => {
+      const reader = new ClaudeFileReader(tmp);
+      expect(await reader.readLatestTitle('nope', 'nope')).toBe('');
+    });
+
+    it('listSessions carries the latest title', async () => {
+      const dirName = 'C--Users-lif3n-src-demo';
+      const sessionId = 's-list';
+      const projectsDir = join(tmp, 'projects', dirName);
+      await mkdir(projectsDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'do thing' }, sessionId }),
+        JSON.stringify({ type: 'ai-title', aiTitle: '做事情', sessionId }),
+      ];
+      await writeFile(join(projectsDir, `${sessionId}.jsonl`), lines.join('\n') + '\n');
+      const reader = new ClaudeFileReader(tmp);
+      const sessions = await reader.listSessions(dirName);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].title).toBe('做事情');
+      expect(sessions[0].preview).toBe('do thing');
+    });
+  });
 });

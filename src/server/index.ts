@@ -13,6 +13,7 @@ import { AnthropicProvider } from '../provider/AnthropicProvider.js';
 import type { ProviderMessage } from '../provider/Provider.js';
 import { resolveProvider, publicConfig, saveProviders, saveGatewayKey, providerEnv } from '../config.js';
 import { conversations, type Conversation, type ConvMessage } from '../conversations.js';
+import { workspaceStore } from '../workspace/store.js';
 import { PromptsStore } from '../prompts.js';
 import { FS_TOOLS, createFsToolExecutor } from '../tools/fsTools.js';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -520,6 +521,16 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       return json(res, 200, { ...(await publicConfig()), feishu: await publicFeishuApps() });
     }
 
+    // —— 终端工作区布局 ——
+    if (path === '/api/workspace' && req.method === 'GET') {
+      return json(res, 200, await workspaceStore.load());
+    }
+    if (path === '/api/workspace' && req.method === 'PUT') {
+      const b = await readBody(req);
+      const clean = await workspaceStore.save(b);
+      return json(res, 200, clean);
+    }
+
     // —— 飞书机器人 ——
     if (path === '/api/feishu/status' && req.method === 'GET') {
       return json(res, 200, { apps: await feishuStatusAll() });
@@ -656,6 +667,10 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       if (!cwd) return json(res, 400, { error: '无法确定该 session 的工作目录' });
       const env = providerId ? await providerEnv(providerId) : undefined;
       return json(res, 200, { command: buildResumeCommand(cwd, sessionId, env) });
+    }
+    if ((m = path.match(/^\/api\/projects\/([^/]+)\/sessions\/([^/]+)\/title$/)) && req.method === 'GET') {
+      const title = await reader.readLatestTitle(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
+      return json(res, 200, { title });
     }
 
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });

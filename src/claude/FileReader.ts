@@ -22,6 +22,8 @@ export interface SessionEntry {
   size: number;
   /** 首条人类 prompt 的预览，用作可读标题（截断 ~120 字符）。 */
   preview: string;
+  /** 最新 AI 标题（jsonl 最后一条 type:"ai-title" 的 aiTitle）；无则空串。 */
+  title?: string;
 }
 
 /** 运行中的 Claude Code 会话状态（来自 ~/.claude/sessions/<pid>.json）。 */
@@ -130,6 +132,7 @@ export class ClaudeFileReader {
         mtimeMs: s.mtimeMs,
         size: s.size,
         preview: await this.readSessionPreview(dirName, sessionId),
+        title: await this.readLatestTitle(dirName, sessionId),
       });
     }
     return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -193,6 +196,58 @@ export class ClaudeFileReader {
         if (preview) return preview.slice(0, 120);
       }
       return '';
+    } catch {
+      return '';
+    } finally {
+      await fh?.close();
+    }
+  }
+
+  /** 按 `${dirName}/${sessionId}` → {mtimeMs, title} 缓存，文件未变零开销。 */
+  private readonly titleCache = new Map<string, { mtimeMs: number; title: string }>();
+
+  /**
+   * session 的最新 AI 标题：取 jsonl **最后一条** `type:"ai-title"` 的 `aiTitle`。
+   * 只读文件尾部 ~256KB（标题随会话演进更新，最新一条靠近文件末尾），按 mtime 缓存。
+   * 无则返回空串（前端兜底用 preview / sid）。
+   */
+  async readLatestTitle(dirName: string, sessionId: string, tailBytes = 262144): Promise<string> {
+    const filePath = join(this.projectsDir(), dirName, `${sessionId}.jsonl`);
+    let st;
+    try {
+      st = await stat(filePath);
+    } catch {
+      return '';
+    }
+    const key = `${dirName}/${sessionId}`;
+    const cached = this.titleCache.get(key);
+    if (cached && cached.mtimeMs === st.mtimeMs) return cached.title;
+    const title = await this.scanLatestTitle(filePath, tailBytes);
+    this.titleCache.set(key, { mtimeMs: st.mtimeMs, title });
+    return title;
+  }
+
+  /** 扫文件尾部，返回最后一条 ai-title 的 aiTitle。首行可能被截断→JSON 解析失败跳过，无碍。 */
+  private async scanLatestTitle(filePath: string, tailBytes: number): Promise<string> {
+    let fh;
+    try {
+      fh = await open(filePath, 'r');
+      const { size } = await fh.stat();
+      const len = Math.min(size, tailBytes);
+      const start = Math.max(0, size - tailBytes);
+      const buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, start);
+      let last = '';
+      for (const line of buf.toString('utf8').split(/\r?\n/)) {
+        if (!line) continue;
+        try {
+          const raw = JSON.parse(line) as { type?: string; aiTitle?: string };
+          if (raw.type === 'ai-title' && raw.aiTitle) last = raw.aiTitle;
+        } catch {
+          /* 跳过无法解析的行（含被尾部截断的首行） */
+        }
+      }
+      return last;
     } catch {
       return '';
     } finally {
