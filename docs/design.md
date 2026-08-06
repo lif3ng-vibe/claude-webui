@@ -277,3 +277,19 @@ claude-webui 充当**可观测的 LLM 网关**：外部工具（Claude Code / Cu
 - **前端**：`GatewayLog.vue`（列表+详情，复用 `renderContent` 渲染 request/response）+ MainApp 顶栏「中转」tab + 网关 key 设置。
 - **交付边界**：真实联调需用户配 provider（baseURL/key/model/type）并把工具 base URL 指向本服务；流式 SSE pipe / 跨格式流式转换在 Node 18+ fetch 上实测。
 - **风险/待办**：跨格式流式转换为事件级（覆盖 text/tool_use/finish，不保证字节等价，不支持多模态 image / thinking 转换）；headers 透传边界；OpenAI 系 provider 真实联调待测。
+
+## 14. 终端工作区（多标签 + 分屏 + 拖拽合并）
+
+单 OS 窗口内托管多个交互式终端为标签/分屏，拖拽合并、横纵向标签栏、任意重组、弹出/收回；不影响现有「🖥 开独立终端窗口」（§11）行为。设计稿 `docs/superpowers/specs/2026-08-04-terminal-workspace-design.md`。
+
+- **定位**：§11 网页终端是「一个终端 = 一个 OS 窗口」；本节是「一个 OS 窗口 = 多终端工作区」，新增的「终端」tab（`/workspace`，也作 MainApp 一个 view）。现有 🖥 完全不动；两者经 per-sessionId 锁互斥。
+- **核心解耦**：`TerminalRegistry`（`web/src/lib/workspace/registry.ts`，脱离 Vue 深响应式，重对象 markRaw）按 tabId 持有 xterm 实例 + WebSocket + 一个终身不换的 `hostEl`；布局树只存 tab 引用。终端在分屏/标签间被拖拽时只移动 `hostEl`（`appendChild` 搬家），xterm 实例与 WS 永不重建——历史与实时连接不丢（这是整个设计成立的地基）。
+- **数据模型**（持久化 `~/.claude-webui/workspace.json`，经后端 `GET/PUT /api/workspace` 读写 + 容错校验 `src/workspace/store.ts`）：布局是 split 树——内节点 `SplitNode{type:'split',id,orientation:'horizontal'|'vertical',sizes,children}`（horizontal=左右并排、vertical=上下堆叠），叶节点 `TabGroupNode{type:'group',id,strip:'top'|'left',stripSize,tabs,activeTabId}`（同时只看一个终端）；`TabDescriptor{id,kind:'resume'|'new',dirName,sessionId,cwd,providerId,title}`。`tabId`(uuid) ≠ `sessionId`。
+- **布局纯函数**（`web/src/lib/workspace/tree.ts`，TDD 全覆盖，被根 vitest 跨目录导入测）：`addTab/moveTab/removeTab/setActiveTab/mergeGroupsInto/splitGroup/setStrip/setStripSize/setSizes/popOutSubtree/insertSubtree/walkTabs/updateTab` 等，不可变更新（structuredClone）；splitpanes（Vue3）负责分屏嵌套 + 可调分隔条（`@resized` 回写 sizes），零自写 resizer。
+- **拖拽**（pointer 事件，非 HTML5 DnD——后者在 Tauri WebView2 不可靠）：`pointerDnd.ts` 全局响应式拖拽态 + `elementFromPoint` 命中（`data-ws-tab`/`data-ws-area`），`dnd.ts` 的 `resolveZone` 纯函数复用。pointerdown 起算、移动超阈值进入拖拽、pointerup 落定；未过阈值松开=点击切标签。拖标签 → 同/跨组重排移动；拖组手柄 `⠿` → 整组合并（需求1）；拖到终端区中心移入、边缘半区 → 沿该方向 `splitGroup` 分屏（需求2/3）。分屏方向翻转=顶栏「排列」钮（`flipOrientation`）。详见 spec §19 实现修正记录。
+- **标签名**：取 jsonl 最新 `type:"ai-title"` 的 `aiTitle`（Claude 自己写、随会话演进；现有 UI 此前未用，仅显示首条 prompt 预览）。后端 `FileReader.readLatestTitle`（尾部读 + mtime 缓存）+ `GET /api/projects/:dir/sessions/:sid/title` + `listSessions` 带 `title`；前端 `useWorkspaceSync` ~5s 按 dir 聚合轮询刷新 registry.title；无 ai-title 用 `preview` 兜底。new 标签在 sid 回填前显示「新会话 · <cwd名>」。
+- **new 标签 sid 回填**：`/terminal/new` 起的 fresh claude 无 sid；`useWorkspaceSync` 在该 cwd 下取 60s 窗口内最新未被认领 session（同 cwd 锁保证唯一）→ `backfillTab` 升级为 resume，使重载后正确 resume 而非另起新 session。
+- **弹出/收回**（混合窗口模型，`web/src/lib/workspace/popout.ts`）：弹某组 → 主树移除该子树 + 释放其终端（让出锁）+ 子树序列化到 localStorage + `openWindow('/workspace?pop=<id>')` 新 OS 窗口只渲染该子树（`poppedMode` 不持久化）；收回/关闭弹出窗 → BroadcastChannel(`cwu-workspace`) 广播子树 → 主窗口 `insertSubtree` 挂回 + TerminalSlot 自动重连。tabId 跨窗保留，身份稳定。
+- **状态/错误**：锁冲突（WS 4001）标"被别处占用"不自动重连；claude 退出保留末屏 + 重连钮；均经 registry 的 `status`/`statusMsg` ref（标签左边框色点提示 live/connecting/exited/locked/error）。
+- **前端文件**（`web/src/`）：`lib/workspace/{types,tree,dnd,pointerDnd,registry,popout}.ts`、`stores/workspace.ts`、`composables/useWorkspaceSync.ts`、`components/workspace/{SplitLayout,TabGroup,TerminalSlot,DropZones,AddTerminalDialog}.vue`、`views/WorkspaceView.vue`。后端：`src/workspace/store.ts`、`FileReader.readLatestTitle`、`server` 三端点；`src-tauri/src/lib.rs` 的 `WebviewWindowBuilder` 加 `.drag_and_drop(false)`。新依赖：`splitpanes`。
+- **风险/待办**：xterm DOM 搬家保真（已证可行，退路是 detach 存缓冲重画，丢滚动历史）；DnD 落点手感需实测调参；弹出/收回跨窗锁释放有微小竞态（重连钮兜底）；三端（web/Electron/Tauri）真机 QA + 拖拽手感待用户实测。
