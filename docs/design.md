@@ -252,7 +252,7 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 
 在飞书里用命令切换并续接 Claude Code session，结果以交互卡片增量流式回传；本地（web 单发续接）任务完成/出错也推飞书。设计稿 `docs/superpowers/specs/2026-08-02-feishu-bot-design.md`，实现计划 `docs/superpowers/plans/2026-08-02-feishu-bot.md`。
 
-- **定位**：支持**多个飞书自建应用**（`config.feishu.apps` 数组），每个应用一个独立 Bot 实例、**绑定一个 Claude session**（发到该机器人的消息即续接它绑的 session；未绑定时可用 `/use` 命令切换）；桌面端托盘保活、sidecar 内每 app 跑一条飞书长连接（`@larksuiteoapi/node-sdk` 的 `lark.ws.Client`，出站即可、无需公网）；仅白名单 user_id 可触发，**白名单为空时首个发消息者自动认作创建人（owner）并持久化**；**连接成功后主动私聊 owner 上线消息**。机器人名/头像在飞书平台各自应用里设；代码 best-effort 用「获取应用信息」API 读名字显示（自建应用常权限不足，读不到则用备注名）。
+- **定位**：支持**多个飞书自建应用**（`config.feishu.apps` 数组），每个应用一个独立 Bot 实例、**绑定一个 Claude session**（发到该机器人的消息即续接它绑的 session；未绑定时可用 `/use` 命令切换）；桌面端托盘保活、sidecar 内每 app 跑一条飞书长连接（`@larksuiteoapi/node-sdk` 的顶层 `WSClient`，`eventDispatcher` 经 `start({eventDispatcher})` 传入；出站即可、无需公网）；仅白名单 user_id 可触发，**白名单为空时首个发消息者自动认作创建人（owner）并持久化**；**连接成功后主动私聊 owner 上线消息**。机器人名/头像在飞书平台各自应用里设；代码 best-effort 用「获取应用信息」API 读名字显示（自建应用常权限不足，读不到则用备注名）。
 - **后端模块**（`src/feishu/`）：`Bot.ts`（白名单+命令分流+流式续接卡片）、`commands.ts`（`/sessions` `/use` `/info` `/stop` `/help`）、`SessionState.ts`（全局 currentSession + 序号缓存 TTL）、`formatter.ts`（stream-json→飞书卡片 + `Throttle` 节流 + 超长折叠）、`Notifier.ts`（通知目标解析）、`feishuConfig.ts`（配置读写，secret 不回传）、`larkAdapter.ts`（封装飞书 SDK 为 `FeishuSender` + 长连接监听器，事件解析为 `BotMessageEvent`）。
 - **共享重构**：`src/claude/SessionRunner.ts` 把「锁→runner→lifecycle」抽成共享驱动器，web SSE、飞书卡片、本地通知都经此；`onFinished` 钩子供通知订阅（`source!=='feishu' && enableNotify && !aborted` 推送）。锁仍是同一个 `runningSessions` Set，web/终端/飞书三方互斥。
 - **端点**：`GET /api/config` 带 `publicFeishuApps`（数组，不回 secret）；`PUT /api/feishu/config`（存 apps 数组并重启所有 bot，不动 providers）；`GET /api/feishu/status`（`{apps:[{id,name,appId,state}]}`）；`POST /api/feishu/restart`。
@@ -263,6 +263,13 @@ lib/{render,sse,shiki,head,openWindow,desktop,broadcast}.ts  # head=动态 title
 - **打包**：`@larksuiteoapi/node-sdk`（纯 JS，含 axios/protobufjs/lodash/qs）esbuild 打进 `dist-server/server.js`（~6.3MB）。
 - **交付边界**：真实飞书联调需用户在飞书开放平台建应用、配「机器人 + 长连接事件 `im.message.receive_v1` + `im:message` 权限」、填 appId/secret/白名单 open_id（见 spec §13）。代码做到配置后即用 + 单测 mock 覆盖（78 测试）。
 - **风险/待办**：飞书卡片 markdown 与标准差异（表格/嵌套列表降级为纯文本）；`patch` 频率限制节流参数需实测调；Windows `shell:true` 下 `/stop` 可能延迟；dev/prod 在桌面安装包里 bot 随 sidecar 常驻需实测。
+- **近期迭代（卡片交互 + 防分叉）**：
+  - **卡片按钮**：`/sessions` 全局按 mtime 降序、每条带「进入会话」按钮、多页带「上一页/下一页」（`card.action.trigger` 回调，需后台订阅「长连接」回调）；`Bot.handleCardAction` 分发 `use`/`page`/`kill`，`larkAdapter.createFeishuListener` 同时注册 `im.message.receive_v1` + `card.action.trigger`。
+  - **切换回显上一轮**：`/use`/按钮切 session 后确认卡附上一轮用户 prompt + agent 文本（`commands.readLastTurn`/`useConfirmCard`，复用 `FileReader.readSessionMessages`）。
+  - **流式思考指示**：`stream-json` 答案正文只走整条快照（非增量），唯一「活」的进度信号是 `system/thinking_tokens` 的 `estimated_tokens`；运行中且无正文时卡片显示 `💭 思考中… ~N tokens`（`formatter.CardAccumulator.thinkingTokens`，单调最大）。
+  - **SDK 1.72 适配修正**：更新卡片用 `im.message.patch`，**路径参数 `message_id` 必须走 `path` 而非 `params`**（否则 `fillApiPath` 报 `request miss message_id path argument`、卡片永不更新）。
+  - **防分叉·kill 接管（已实现）**：飞书 spawn `claude -p` 与外部 claude（独立终端/herdr）并发 resume 同一 session 会分叉 transcript；`runningSessions` 锁只覆盖应用自管运行，看不到外部进程。`/use` 到运行中的 session（`~/.claude/sessions/<pid>.json` 探测，`runningPidsFor` + signal-0 存活过滤）→ 警告卡 + 「结束它并由飞书接管」按钮 kill 那个 pid（Win `taskkill /PID /T /F`、POSIX `kill -9`）→ 飞书成唯一写入者；`runContinue` spawn 前也查外部运行、占则拒绝。详见 `src/claude/runningSessions.ts`。
+  - **后续构想（未做）·注入 web 终端**：更「无缝」的防分叉是飞书消息直接注入该 session 的 **app web 终端** PTY（同一 claude 进程，不分叉），响应在终端实时显示、飞书做输入通道。需新增**后端** `sessionId→PTY write` 注册表（现 `TerminalManager` 的 PTY 随 WebSocket 生灭、无后端注册表；`§14` 的 `TerminalRegistry` 是前端 xterm 侧、不算）+ 改 `createTerminalHandler` 注册/注销。**只覆盖 app web 终端**——外部 claude 进程仍不可注入（拿不到 stdin 句柄），那部分仍靠 kill 接管兜底。
 
 ## 13. 中转网关（多 provider 代理 + 请求查看）
 
