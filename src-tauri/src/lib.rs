@@ -66,8 +66,13 @@ async fn create_window(app: AppHandle, state: AppState, path: String) -> Result<
     let mut builder = WebviewWindowBuilder::new(&app, label.clone(), WebviewUrl::External(url))
         .decorations(false)
         .initialization_script(INIT_SCRIPT)
-        .drag_and_drop(false) // 关闭 OS 级拖放拦截，让 webview 的 HTML5 拖拽（终端工作区）生效
         .title("");
+    // Windows：关闭 OLE 拖放接管，让 webview 的 HTML5 拖拽（终端工作区）生效。
+    // macOS/Linux 无此 OS 级拦截；drag_and_drop 为 Windows-only API，跨平台编译须按 cfg gate。
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder.drag_and_drop(false);
+    }
     if let Some(s) = saved {
         builder = builder.inner_size(s.width as f64, s.height as f64)
             .position(s.x as f64, s.y as f64)
