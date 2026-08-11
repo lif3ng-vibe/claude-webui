@@ -54,12 +54,17 @@ async fn url_for_route(state: &AppState, path: &str) -> Result<String, String> {
 }
 
 async fn create_window(app: AppHandle, state: AppState, path: String) -> Result<(), String> {
+    log::info!("create_window 开始: path={}", path);
     let label = label_for_route(&path);
+    log::info!("窗口 label: {}", label);
     if let Some(w) = app.get_webview_window(&label) {
+        log::info!("窗口已存在，设为焦点");
         w.set_focus().ok();
         return Ok(());
     }
+    log::info!("获取 URL");
     let url_str = url_for_route(&state, &path).await?;
+    log::info!("URL: {}", url_str);
     let url: tauri::Url = url_str.parse().map_err(|e: url::ParseError| e.to_string())?;
     let saved = window_state::load(&path);
 
@@ -237,6 +242,7 @@ pub fn run() {
         std::env::consts::OS,
         std::env::consts::ARCH
     );
+    log::info!("开始创建 Tauri Builder");
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
@@ -250,22 +256,33 @@ pub fn run() {
             service_status, service_start, service_stop, service_restart, service_get_logs,
         ])
         .setup(|app| {
+            log::info!("setup 开始");
             let handle = app.handle().clone();
             let state = app.state::<AppState>().inner().clone();
+            log::info!("获取 handle 和 state 成功");
             // 托盘
+            log::info!("开始构建托盘");
             if let Err(e) = build_tray(&handle) {
                 log::error!("托盘构建失败: {e}");
             }
+            log::info!("托盘构建完成");
             // 异步：拉起 sidecar，再创建主窗口。
+            log::info!("开始异步任务：sidecar 和窗口创建");
             let app2 = handle.clone();
             let state2 = state.clone();
             tauri::async_runtime::spawn(async move {
+                log::info!("异步任务开始");
                 state2.set_app(app2.clone()).await;
+                log::info!("开始启动 sidecar");
                 if let Err(e) = state2.start(app2.clone()).await {
                     log::error!("sidecar 启动失败: {e}");
+                } else {
+                    log::info!("sidecar 启动成功，开始创建窗口");
                 }
                 if let Err(e) = create_window(app2, state2, "/".into()).await {
                     log::error!("主窗口创建失败: {e}");
+                } else {
+                    log::info!("主窗口创建成功");
                 }
             });
             Ok(())

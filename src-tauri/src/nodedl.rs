@@ -55,8 +55,11 @@ pub async fn resolve_node() -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("CLAUDE_WEBUI_NODE") {
         return Ok(PathBuf::from(p));
     }
-    if let Some(_v) = check_version(Path::new("node")) {
-        return Ok(PathBuf::from("node"));
+    // 尝试从 PATH 中找到 node 的绝对路径
+    if let Ok(node_path) = which::which("node") {
+        if let Some(_v) = check_version(&node_path) {
+            return Ok(node_path);
+        }
     }
     let cached = node_binary_in_cache();
     if cached.exists() && check_version(&cached).is_some() {
