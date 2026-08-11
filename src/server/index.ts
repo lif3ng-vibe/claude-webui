@@ -1,3 +1,5 @@
+// 必须首个导入：模块加载即同步修复 PATH（打包后图形应用 PATH 极简，找不到 claude 等命令）。
+import './shellEnv.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
