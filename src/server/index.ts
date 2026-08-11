@@ -1,7 +1,7 @@
-// 必须首个导入：模块加载即同步修复 PATH（打包后图形应用 PATH 极简，找不到 claude 等命令）。
-import './shellEnv.js';
-// 次优先导入：给 node-pty 的 spawn-helper 加 +x（打包后权限位丢失致 posix_spawn 失败）。
-import './fixPtyExec.js';
+// 顺序敏感：以下三个 import 在 node-pty 加载前完成环境自愈，须先于其他依赖。
+import './shellEnv.js'; // ① 修复 PATH
+import './fixPtyExec.js'; // ② spawn-helper +x
+import './fixPtyAsar.js'; // ③ Electron 下把 node-pty 迁出 app.asar.unpacked 并 patch require
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';

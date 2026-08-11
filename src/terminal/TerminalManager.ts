@@ -2,7 +2,11 @@
 // resume 模式：claude --resume <sid>（现有）。new 模式：fresh claude（不带 --resume），用于目录内新建会话。
 // 协议：C→S 二进制=终端输入（UTF-8）；文本={type:'resize',cols,rows}。S→C 二进制=PTY 输出；文本={type:'exit'|'error'}。
 // 生命周期：WS 关 → kill PTY + 释放锁（断开即杀）。锁与单发续接共享 runningSessions（resume 按 sid、new 按 "new:"+cwd）。
-import * as nodePty from 'node-pty';
+// 用 CJS require 加载 node-pty（而非 ESM import）：使 fixPtyAsar 的 Module._resolveFilename
+// patch 能生效（Electron 下把 node-pty 重定向到非 app.asar.unpacked 的缓存副本，否则
+// spawn-helper 在 app.asar.unpacked 路径下 posix_spawn 失败）。ESM import 绕过该 patch。
+import { createRequire } from 'node:module';
+const nodePty = createRequire(import.meta.url)('node-pty') as typeof import('node-pty');
 import type { WebSocket } from 'ws';
 import type { ClaudeFileReader } from '../claude/FileReader.js';
 import { writeProviderSettings, delProviderSettings } from '../claude/providerSettings.js';
