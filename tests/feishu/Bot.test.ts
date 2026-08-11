@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { FeishuBot } from '../../src/feishu/Bot.js';
 import { SessionRunner } from '../../src/claude/SessionRunner.js';
 import { SessionState } from '../../src/feishu/SessionState.js';
@@ -6,6 +6,9 @@ import type { ClaudeRunEvent, ClaudeRunRequest, ClaudeNewRequest } from '../../s
 import type { FeishuSender } from '../../src/feishu/types.js';
 import type { FeishuApp } from '../../src/feishu/feishuConfig.js';
 import type { ClaudeFileReader } from '../../src/claude/FileReader.js';
+import { runningPidsFor, killPid } from '../../src/claude/runningSessions.js';
+
+vi.mock('../../src/claude/runningSessions.js', () => ({ runningPidsFor: vi.fn(async () => []), killPid: vi.fn(async () => true) }));
 
 function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unknown>> } {
   const calls: Array<Record<string, unknown>> = [];
@@ -24,7 +27,7 @@ function mockSender(): { sender: FeishuSender; calls: Array<Record<string, unkno
   return { sender, calls };
 }
 
-function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string }; providerId?: string; onSetProvider?: (id: string | null) => Promise<void> } = {}) {
+function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]; current?: { sessionId: string; dirName: string; cwd: string }; lock?: Set<string>; allowed?: string[]; boundSession?: { dirName: string; sessionId: string }; providerId?: string; onSetProvider?: (id: string | null) => Promise<void>; messages?: any[] } = {}) {
   const { sender, calls } = mockSender();
   const lock = opts.lock ?? new Set<string>();
   const events =
@@ -50,7 +53,7 @@ function makeBot(opts: { events?: ClaudeRunEvent[]; newEvents?: ClaudeRunEvent[]
   if (opts.current) state.set(opts.current);
   const cfg: FeishuApp = { id: 'a1', appId: 'a', appSecret: 's', allowedUserIds: opts.allowed ? [...opts.allowed] : ['ou_me'], domain: 'feishu', enableNotify: true, boundSession: opts.boundSession, providerId: opts.providerId };
   const onFirstCalls: string[] = [];
-  const reader = { listProjects: async () => [], listSessions: async () => [], getSessionCwd: async () => '/p' } as unknown as ClaudeFileReader;
+  const reader = { listProjects: async () => [], listSessions: async () => [], getSessionCwd: async () => '/p', readSessionMessages: async () => opts.messages ?? [] } as unknown as ClaudeFileReader;
   const bot = new FeishuBot({
     reader,
     sessionRunner,
@@ -106,6 +109,14 @@ describe('FeishuBot handleMessage', () => {
     const { bot, calls } = makeBot({ current: { sessionId: 'abc-12345', dirName: 'd', cwd: '/p' }, lock });
     await bot.handleMessage({ openId: 'ou_me', text: 'hi', isMention: false });
     expect(calls.some((c) => c.m === 'sendText' && String(c.text).includes('正忙'))).toBe(true);
+    expect(calls.some((c) => c.m === 'sendCard')).toBe(false);
+  });
+
+  it('续接：目标在别处运行（外部 claude）→ 拦截不 spawn', async () => {
+    vi.mocked(runningPidsFor).mockResolvedValueOnce([1234]);
+    const { bot, calls } = makeBot({ current: { sessionId: 'abc-12345', dirName: 'd', cwd: '/p' } });
+    await bot.handleMessage({ openId: 'ou_me', text: 'hi', isMention: false });
+    expect(calls.some((c) => c.m === 'sendText' && String(c.text).includes('另一个 claude 进程'))).toBe(true);
     expect(calls.some((c) => c.m === 'sendCard')).toBe(false);
   });
 
@@ -184,5 +195,75 @@ describe('FeishuBot handleMessage', () => {
     const { bot } = makeBot({ onSetProvider: async (id) => { onSet.push(id); } });
     await bot.handleMessage({ openId: 'ou_me', text: '/provider off', isMention: false });
     expect(onSet).toEqual([null]);
+  });
+});
+
+describe('FeishuBot handleCardAction', () => {
+  it('action=use → 切 session + 回确认卡', async () => {
+    const { bot, state, calls } = makeBot();
+    await bot.handleCardAction({
+      value: { action: 'use', sessionId: 'sess-xyz', dirName: 'd', cwd: '/work' },
+      openId: 'ou_me',
+    });
+    expect(state.current()).toEqual({ sessionId: 'sess-xyz', dirName: 'd', cwd: '/work' });
+    expect(calls.some((c) => c.m === 'sendCard' && c.id === 'ou_me')).toBe(true);
+    expect(JSON.stringify(calls)).toContain('已切换 session');
+  });
+
+  it('按钮切换回显上一轮（用户+agent 文本）', async () => {
+    const { bot, calls } = makeBot({
+      messages: [
+        { type: 'user', message: { role: 'user', content: '老 prompt' } },
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '老回复' }] } },
+      ],
+    });
+    await bot.handleCardAction({
+      value: { action: 'use', sessionId: 'sess-xyz', dirName: 'd', cwd: '/work' },
+      openId: 'ou_me',
+    });
+    const card = calls.find((c) => c.m === 'sendCard')?.card;
+    expect(JSON.stringify(card)).toContain('老 prompt');
+    expect(JSON.stringify(card)).toContain('老回复');
+  });
+
+  it('非白名单 openId → 忽略（不切、不发卡）', async () => {
+    const { bot, state, calls } = makeBot({ current: { sessionId: 'orig', dirName: 'd', cwd: '/p' } });
+    await bot.handleCardAction({
+      value: { action: 'use', sessionId: 'sess-xyz', dirName: 'd', cwd: '/work' },
+      openId: 'ou_other',
+    });
+    expect(state.current()?.sessionId).toBe('orig');
+    expect(calls.some((c) => c.m === 'sendCard')).toBe(false);
+  });
+
+  it('未知 action → 忽略', async () => {
+    const { bot, state, calls } = makeBot();
+    await bot.handleCardAction({ value: { action: 'nope' }, openId: 'ou_me' });
+    expect(state.current()).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  it('action=page → 派发分页（空表回「没有可用」文本）', async () => {
+    const { bot, calls } = makeBot();
+    await bot.handleCardAction({ value: { action: 'page', page: 1 }, openId: 'ou_me' });
+    expect(calls.some((c) => c.m === 'sendText' && String(c.text).includes('没有可用'))).toBe(true);
+  });
+
+  it('action=kill → killPid + set state + 回成功', async () => {
+    vi.mocked(runningPidsFor).mockResolvedValueOnce([1234]);
+    const { bot, state, calls } = makeBot();
+    await bot.handleCardAction({ value: { action: 'kill', sessionId: 'sess-9', dirName: 'd', cwd: '/w' }, openId: 'ou_me' });
+    expect(killPid).toHaveBeenCalledWith(1234);
+    expect(state.current()?.sessionId).toBe('sess-9');
+    expect(calls.some((c) => c.m === 'sendText' && String(c.text).includes('已结束'))).toBe(true);
+  });
+
+  it('use 到运行中 session → 回警告卡（不回确认卡）', async () => {
+    vi.mocked(runningPidsFor).mockResolvedValueOnce([1234]);
+    const { bot, calls } = makeBot();
+    await bot.handleCardAction({ value: { action: 'use', sessionId: 's', dirName: 'd', cwd: '/w' }, openId: 'ou_me' });
+    const card = calls.find((c) => c.m === 'sendCard')?.card;
+    expect(JSON.stringify(card)).toContain('正在运行');
+    expect(JSON.stringify(card)).not.toContain('已切换 session');
   });
 });

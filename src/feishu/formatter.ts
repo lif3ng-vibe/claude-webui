@@ -64,6 +64,8 @@ export class CardAccumulator {
   private stderr: string[] = [];
   resultText: string | null = null;
   exited: { code: number | null } | null = null;
+  /** 最近一次 extended-thinking 的累计 token 估计（system/thinking_tokens），用于运行中进度指示。 */
+  thinkingTokens = 0;
 
   accumulate(ev: ClaudeRunEvent): void {
     if (ev.type === 'stream-json') {
@@ -79,8 +81,12 @@ export class CardAccumulator {
       } else if (type === 'result') {
         const r = (d as { result?: unknown }).result;
         this.resultText = typeof r === 'string' ? r : JSON.stringify(r ?? '');
+      } else if (type === 'system' && d.subtype === 'thinking_tokens') {
+        // extended-thinking 的 token 计数是续接流里唯一「活」的进度信号（答案正文只走快照）。
+        const n = Number((d as { estimated_tokens?: unknown }).estimated_tokens);
+        if (Number.isFinite(n) && n > this.thinkingTokens) this.thinkingTokens = n;
       }
-      // system / 其它忽略
+      // 其它 system 事件忽略
     } else if (ev.type === 'stderr') {
       this.stderr.push(ev.text);
     } else if (ev.type === 'exit') {
@@ -134,6 +140,10 @@ export function toCard(acc: CardAccumulator, opts: ToCardOpts): FeishuCard {
   }
 
   const out: unknown[] = [];
+  // 思考进度指示：仅在运行中、尚未产出正文时显示（答案一到就让位给正文）。
+  if (opts.status === 'running' && acc.thinkingTokens > 0 && !bodyText.trim()) {
+    out.push(md(`💭 思考中… ~${acc.thinkingTokens} tokens`));
+  }
   const body = bodyText.trim() || (acc.resultText ?? '').trim();
   if (body) out.push(md(trunc(body, MAX_BODY_CHARS)));
   out.push(...tools);

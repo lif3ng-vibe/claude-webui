@@ -4,7 +4,8 @@ import { extractSessionId } from '../claude/Runner.js';
 import { encodeCwd } from '../claude/pathEncoding.js';
 import { SessionRunner } from '../claude/SessionRunner.js';
 import { providerEnv } from '../config.js';
-import { handleCommand } from './commands.js';
+import { handleCommand, readLastTurn, useConfirmCard, useBusyCard, buildSessionsPage } from './commands.js';
+import { runningPidsFor, killPid } from '../claude/runningSessions.js';
 import { createAccumulator, toCard, Throttle } from './formatter.js';
 import { SessionState } from './SessionState.js';
 import type { FeishuApp } from './feishuConfig.js';
@@ -16,6 +17,15 @@ export interface BotMessageEvent {
   chatId?: string;
   text: string;
   isMention: boolean;
+}
+
+/** 飞书卡片按钮点击事件（由 larkAdapter 把 card.action.trigger 转成这个）。 */
+export interface CardActionEvent {
+  /** 按钮的 value 载荷（如 { action:'use', sessionId, dirName, cwd }）。 */
+  value: unknown;
+  /** 点击者 open_id。 */
+  openId: string;
+  chatId?: string;
 }
 
 export interface BotDeps {
@@ -33,8 +43,11 @@ export interface BotDeps {
   onSetProvider?: (providerId: string | null) => Promise<void>;
   /** provider 列表（/provider 无参展示用）；server 注入 publicConfig.providers。 */
   providers?: () => Promise<Array<{ id: string; name?: string }>>;
-  /** 启动事件监听（生产用 lark.ws.Client；测试注入 mock）。handler 收已解析事件。 */
-  startListener: (handler: (ev: BotMessageEvent) => void) => Promise<void>;
+  /** 启动事件监听（生产用 lark.ws.Client；测试注入 mock）。onMessage 收消息，onCardAction 收卡片按钮点击。 */
+  startListener: (
+    onMessage: (ev: BotMessageEvent) => void,
+    onCardAction: (ev: CardActionEvent) => void,
+  ) => Promise<void>;
   stopListener?: () => Promise<void>;
   now?: () => number;
 }
@@ -72,9 +85,14 @@ export class FeishuBot {
       const cwd = await this.deps.reader.getSessionCwd(b.dirName, b.sessionId).catch(() => undefined);
       if (cwd) this.deps.state.set({ sessionId: b.sessionId, dirName: b.dirName, cwd });
     }
-    await this.deps.startListener((ev) => {
-      void this.handleMessage(ev);
-    });
+    await this.deps.startListener(
+      (ev) => {
+        void this.handleMessage(ev);
+      },
+      (ev) => {
+        void this.handleCardAction(ev);
+      },
+    );
     this.online = true;
     // 上线后给创建人（白名单首位）私聊一条，确认连接成功。
     const owner = this.deps.config.allowedUserIds[0];
@@ -142,6 +160,58 @@ export class FeishuBot {
     await this.runContinue(openId, clean);
   }
 
+  /**
+   * 卡片按钮点击：action==='use' 等价 /use——切当前 session 并回确认卡。
+   * 权限：白名单非空时点击者须在名单内；名单空（尚未认主）放行。
+   */
+  async handleCardAction(ev: CardActionEvent): Promise<void> {
+    const openId = ev.openId;
+    const allowed = this.deps.config.allowedUserIds;
+    if (allowed.length > 0 && !allowed.includes(openId)) return;
+    const v = ev.value as { action?: string; sessionId?: string; dirName?: string; cwd?: string; page?: unknown; dirFilter?: unknown } | undefined;
+    if (!v?.action) return;
+    if (v.action === 'use') {
+      if (typeof v.sessionId !== 'string') return;
+      const target = { sessionId: v.sessionId, dirName: v.dirName ?? '', cwd: v.cwd ?? '' };
+      this.deps.state.set(target);
+      const pids = await runningPidsFor(this.deps.reader, target.sessionId);
+      if (pids.length) {
+        await this.deps.sender.sendCard('open_id', openId, useBusyCard(target, pids)).catch(() => {});
+        return;
+      }
+      const last = await readLastTurn(this.deps.reader, target.dirName, target.sessionId);
+      await this.deps.sender.sendCard('open_id', openId, useConfirmCard(target, last)).catch(() => {});
+      return;
+    }
+    if (v.action === 'page') {
+      // 翻页：重渲指定页（顺带刷新整表 mtime 排序 + 序号索引）。
+      const page = Number(v.page) || 1;
+      const dirFilter = typeof v.dirFilter === 'string' ? v.dirFilter : '';
+      const result = await buildSessionsPage(
+        { reader: this.deps.reader, state: this.deps.state, busySessionIds: this.deps.busySessionIds },
+        page,
+        dirFilter,
+      );
+      if (result.kind === 'reply') await this.deps.sender.sendCard('open_id', openId, result.card).catch(() => {});
+      else if (result.kind === 'reply-text') await this.deps.sender.sendText('open_id', openId, result.text).catch(() => {});
+      return;
+    }
+    if (v.action === 'kill') {
+      // 接管：kill 该 session 的其它运行 pid，使飞书成为唯一写入者（防分叉）。
+      if (typeof v.sessionId !== 'string') return;
+      const target = { sessionId: v.sessionId, dirName: v.dirName ?? '', cwd: v.cwd ?? '' };
+      const pids = await runningPidsFor(this.deps.reader, target.sessionId);
+      const killed: number[] = [];
+      for (const pid of pids) if (await killPid(pid)) killed.push(pid);
+      this.deps.state.set(target);
+      console.error(`[feishu-card] card action kill -> ${target.sessionId.slice(0, 8)} pids=[${pids.join(',')}] killed=[${killed.join(',')}] by ${openId}`);
+      const text = killed.length
+        ? `✅ 已结束 PID ${killed.join(', ')}。现在由飞书独占，发消息即可续接。`
+        : '该 session 当前没在运行（或已退出），可直接发消息续接。';
+      await this.deps.sender.sendText('open_id', openId, text).catch(() => {});
+    }
+  }
+
   /** 串行化 patch，避免并发 sendCard/patchCard 竞态（messageId 首次设置）。 */
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.patchQueue.then(fn, fn) as Promise<T>;
@@ -158,6 +228,17 @@ export class FeishuBot {
     if (!cur) {
       await sender.sendText('open_id', openId, '未选择 session。用 /sessions 查看，/use <序号> 切换。').catch(() => {});
       return;
+    }
+    // 防分叉：目标 session 未被本应用占用、却在别处（外部 claude）跑着 → 不 spawn，提示先 kill 接管。
+    // （被本应用占用时交给下面 runLocked 的 busy 分支处理，避免误拦自己的并发。）
+    if (!this.deps.busySessionIds().has(cur.sessionId)) {
+      const extPids = await runningPidsFor(this.deps.reader, cur.sessionId);
+      if (extPids.length) {
+        await sender
+          .sendText('open_id', openId, `该 session 正在另一个 claude 进程运行（PID ${extPids.join(', ')}），并发续接会分叉。先用 /use 查看、点「结束它并由飞书接管」再发。`)
+          .catch(() => {});
+        return;
+      }
     }
     const ac = new AbortController();
     this.currentAbort = ac;

@@ -3,7 +3,7 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FeishuApp } from './feishuConfig.js';
 import type { FeishuSender } from './types.js';
-import type { BotMessageEvent } from './Bot.js';
+import type { BotMessageEvent, CardActionEvent } from './Bot.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = any;
@@ -59,7 +59,9 @@ export function createFeishuSender(client: AnyClient): FeishuSender {
     async patchCard(messageId, card) {
       const resp = await client.im.message.patch({
         data: { content: JSON.stringify(card) },
-        params: { message_id: messageId },
+        // SDK 1.72：路径参数 message_id 必须走 path（旧版用 params 会被当 query，
+        // 导致 fillApiPath 报 "request miss message_id path argument"，卡片永不更新）。
+        path: { message_id: messageId },
       });
       if (resp.code !== 0) throw new Error(`feishu patchCard: ${resp.code} ${resp.msg}`);
     },
@@ -80,6 +82,7 @@ export function createFeishuSender(client: AnyClient): FeishuSender {
 export function createFeishuListener(
   cfg: FeishuApp,
   onMessage: (ev: BotMessageEvent) => void,
+  onCardAction?: (ev: CardActionEvent) => void,
 ): { start: () => Promise<void>; stop: () => Promise<void> } {
   const eventDispatcher = new (lark as AnyClient).EventDispatcher({}).register({
     'im.message.receive_v1': async (data: AnyClient) => {
@@ -97,16 +100,26 @@ export function createFeishuListener(
       const mentions = Array.isArray(data?.message?.mentions) ? data.message.mentions : [];
       onMessage({ openId, chatId, text, isMention: mentions.length > 0 });
     },
+    // 卡片按钮点击（/sessions「进入会话」等）。需后台订阅 card.action.trigger（长连接方式）。
+    'card.action.trigger': async (data: AnyClient) => {
+      if (!onCardAction) return;
+      onCardAction({
+        value: data?.action?.value,
+        openId: data?.operator?.open_id ?? '',
+        chatId: data?.context?.open_chat_id ?? data?.open_chat_id,
+      });
+    },
   });
-  const wsClient = new (lark as AnyClient).ws.Client({
+  // SDK 1.24+：长连接客户端改为顶层 WSClient（旧 lark.ws.Client 已移除），
+  // eventDispatcher 由构造器迁到 start({}) 传入。
+  const wsClient = new (lark as AnyClient).WSClient({
     appId: cfg.appId,
     appSecret: cfg.appSecret,
-    eventDispatcher,
     loggerLevel: (lark as AnyClient).LoggerLevel?.info,
   });
   return {
     start: async () => {
-      await wsClient.start();
+      await wsClient.start({ eventDispatcher });
     },
     stop: async () => {
       try {

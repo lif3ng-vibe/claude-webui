@@ -61,6 +61,27 @@ describe('formatter toCard', () => {
     const acc = feed([{ type: 'stderr', text: 'some warning' }]);
     expect(JSON.stringify(toCard(acc, { title: 'T', status: 'running', cwd: '/p' }))).toContain('some warning');
   });
+
+  it('running + thinking_tokens 计数显示思考指示；产出正文后/完成态不显示', () => {
+    const acc = feed([
+      { type: 'stream-json', data: { type: 'system', subtype: 'thinking_tokens', estimated_tokens: 42 } },
+    ]);
+    const running = JSON.stringify(toCard(acc, { title: 'T', status: 'running', cwd: '/p' }));
+    expect(running).toContain('思考中');
+    expect(running).toContain('42');
+
+    // 产出正文后让位
+    const acc2 = feed([
+      { type: 'stream-json', data: { type: 'system', subtype: 'thinking_tokens', estimated_tokens: 42 } },
+      { type: 'stream-json', data: { type: 'assistant', message: { uuid: 'u1', content: [{ type: 'text', text: 'answer' }] } } },
+    ]);
+    const withBody = JSON.stringify(toCard(acc2, { title: 'T', status: 'running', cwd: '/p' }));
+    expect(withBody).toContain('answer');
+    expect(withBody).not.toContain('思考中');
+
+    // done 态不显示
+    expect(JSON.stringify(toCard(acc, { title: 'T', status: 'done', cwd: '/p' }))).not.toContain('思考中');
+  });
 });
 
 describe('Throttle', () => {

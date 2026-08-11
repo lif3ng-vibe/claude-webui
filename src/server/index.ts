@@ -164,8 +164,8 @@ async function startAllFeishuApps(): Promise<void> {
             log('info', 'feishu: 已认主', { app: cfg.id, openId });
           }
         },
-        startListener: async (handler) => {
-          const listener = createFeishuListener(cfg, handler);
+        startListener: async (msgHandler, cardHandler) => {
+          const listener = createFeishuListener(cfg, msgHandler, cardHandler);
           feishuListeners.set(cfg.id, listener);
           await listener.start();
         },

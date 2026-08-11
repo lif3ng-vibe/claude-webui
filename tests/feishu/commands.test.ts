@@ -1,13 +1,17 @@
-import { describe, it, expect } from 'vitest';
-import { handleCommand } from '../../src/feishu/commands.js';
+import { describe, it, expect, vi } from 'vitest';
+import { handleCommand, extractLastTurn, buildSessionsPage } from '../../src/feishu/commands.js';
+import { runningPidsFor } from '../../src/claude/runningSessions.js';
+
+vi.mock('../../src/claude/runningSessions.js', () => ({ runningPidsFor: vi.fn(async () => []), killPid: vi.fn() }));
 import { SessionState } from '../../src/feishu/SessionState.js';
 import type { ClaudeFileReader } from '../../src/claude/FileReader.js';
 import type { CommandContext } from '../../src/feishu/commands.js';
 
-function mockReader(projects: any[], sessions: Record<string, any[]>): ClaudeFileReader {
+function mockReader(projects: any[], sessions: Record<string, any[]>, msgs: any[] = []): ClaudeFileReader {
   return {
     listProjects: async () => projects,
     listSessions: async (dir: string) => sessions[dir] ?? [],
+    readSessionMessages: async () => msgs,
   } as unknown as ClaudeFileReader;
 }
 
@@ -49,6 +53,53 @@ describe('commands handleCommand', () => {
     expect(state.getByIndex(2)?.sessionId).toBe('def-456');
   });
 
+  it('/sessions 卡片含「进入会话」按钮，value 带 sessionId', async () => {
+    const reader = mockReader(
+      [{ dirName: 'd1', cwd: '/p1', sessionCount: 1, latestMtimeMs: 0 }],
+      { d1: [{ sessionId: 'abc-123', dirName: 'd1', mtimeMs: 0, size: 0, preview: 'fix bug' }] },
+    );
+    const r = await handleCommand('/sessions', ctx(reader, new SessionState()));
+    expect(r.kind).toBe('reply');
+    const card = (r as { card: { elements?: Array<Record<string, unknown>> } }).card;
+    const actions = (card.elements ?? []).filter((e) => e.tag === 'action');
+    expect(actions.length).toBe(1);
+    const btn = (actions[0].actions as Array<Record<string, unknown>>)[0];
+    expect(btn.tag).toBe('button');
+    expect(String((btn.text as { content?: string }).content)).toContain('进入会话');
+    expect((btn.value as { action?: string }).action).toBe('use');
+    expect((btn.value as { sessionId?: string }).sessionId).toBe('abc-123');
+  });
+
+  it('/sessions 全局按最后更新时间(mtime)降序', async () => {
+    const reader = mockReader(
+      [{ dirName: 'd1', cwd: '/p1', sessionCount: 2, latestMtimeMs: 0 }],
+      {
+        d1: [
+          { sessionId: 'older-1', dirName: 'd1', mtimeMs: 1, size: 0, preview: 'old' },
+          { sessionId: 'newer-9', dirName: 'd1', mtimeMs: 9, size: 0, preview: 'new' },
+        ],
+      },
+    );
+    const state = new SessionState();
+    await handleCommand('/sessions', ctx(reader, state));
+    expect(state.getByIndex(1)?.sessionId).toBe('newer-9');
+    expect(state.getByIndex(2)?.sessionId).toBe('older-1');
+  });
+
+  it('buildSessionsPage：首页有「下一页」无「上一页」，末页反之', async () => {
+    const sessions = Array.from({ length: 11 }, (_, i) => ({ sessionId: `s${i}`, dirName: 'd1', mtimeMs: i, size: 0, preview: `p${i}` }));
+    const reader = mockReader([{ dirName: 'd1', cwd: '/p', sessionCount: 11, latestMtimeMs: 0 }], { d1: sessions });
+    const deps = { reader, state: new SessionState(), busySessionIds: () => new Set<string>() };
+    const p1 = await buildSessionsPage(deps, 1, '');
+    const c1 = JSON.stringify((p1 as { card: unknown }).card);
+    expect(c1).toContain('下一页');
+    expect(c1).not.toContain('上一页');
+    const p2 = await buildSessionsPage(deps, 2, '');
+    const c2 = JSON.stringify((p2 as { card: unknown }).card);
+    expect(c2).toContain('上一页');
+    expect(c2).not.toContain('下一页');
+  });
+
   it('/sessions 标记忙闲', async () => {
     const reader = mockReader(
       [{ dirName: 'd1', cwd: '/p1', sessionCount: 1, latestMtimeMs: 0 }],
@@ -77,6 +128,43 @@ describe('commands handleCommand', () => {
     const r = await handleCommand('/use 1', ctx(mockReader([], {}), new SessionState()));
     expect(r.kind).toBe('reply-text');
     expect((r as { text: string }).text).toContain('重新 /sessions');
+  });
+
+  it('/use 切换后确认卡回显上一轮（用户+agent 文本）', async () => {
+    const state = new SessionState();
+    state.setIndex([{ sessionId: 'abc-123', dirName: 'd1', cwd: '/p1' }]);
+    const reader = mockReader([], {}, [
+      { type: 'user', message: { role: 'user', content: '帮我修 bug' } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '已修复' }] } },
+    ]);
+    const r = await handleCommand('/use 1', ctx(reader, state));
+    expect(r.kind).toBe('reply');
+    const s = JSON.stringify((r as { card: unknown }).card);
+    expect(s).toContain('帮我修 bug');
+    expect(s).toContain('已修复');
+  });
+
+  it('/use 到运行中的 session → 警告卡含「结束它」kill 按钮', async () => {
+    vi.mocked(runningPidsFor).mockResolvedValueOnce([1234]);
+    const state = new SessionState();
+    state.setIndex([{ sessionId: 'abc-123', dirName: 'd1', cwd: '/p1' }]);
+    const r = await handleCommand('/use 1', ctx(mockReader([], {}), state));
+    expect(r.kind).toBe('reply');
+    const s = JSON.stringify((r as { card: unknown }).card);
+    expect(s).toContain('正在运行');
+    expect(s).toContain('1234');
+    expect(s).toContain('"action":"kill"');
+  });
+
+  it('extractLastTurn：取最后人类文本 + 最后 assistant 文本，跳过 tool_result', () => {
+    const msgs = [
+      { message: { role: 'user', content: 'first' } },
+      { message: { role: 'assistant', content: [{ type: 'text', text: 'a1' }] } },
+      { message: { role: 'user', content: [{ type: 'tool_result', content: 'x' }] } },
+      { message: { role: 'user', content: 'second prompt' } },
+      { message: { role: 'assistant', content: [{ type: 'thinking', thinking: '...' }, { type: 'text', text: 'final ans' }] } },
+    ];
+    expect(extractLastTurn(msgs)).toEqual({ userText: 'second prompt', agentText: 'final ans' });
   });
 
   it('/info 未选提示', async () => {

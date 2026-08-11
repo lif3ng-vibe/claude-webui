@@ -29,6 +29,8 @@ export interface SessionEntry {
 /** 运行中的 Claude Code 会话状态（来自 ~/.claude/sessions/<pid>.json）。 */
 export interface RunningSessionInfo {
   sessionId: string;
+  /** 进程 pid（来自 json 的 pid 字段，兜底取文件名）。 */
+  pid: number;
   cwd: string;
   status: string; // "busy" | "idle" | ...
   name?: string;
@@ -78,7 +80,7 @@ export class ClaudeFileReader {
       if (!f.endsWith('.json')) continue;
       try {
         const raw = JSON.parse(await readFile(join(dir, f), 'utf8'));
-        if (raw.sessionId) out.push({ sessionId: raw.sessionId, cwd: raw.cwd || '', status: raw.status || '', name: raw.name, updatedAt: raw.updatedAt });
+        if (raw.sessionId) out.push({ sessionId: raw.sessionId, pid: Number(raw.pid) || Number(f.slice(0, -'.json'.length)) || 0, cwd: raw.cwd || '', status: raw.status || '', name: raw.name, updatedAt: raw.updatedAt });
       } catch {
         /* 跳过无法解析的文件 */
       }
