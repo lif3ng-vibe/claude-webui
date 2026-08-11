@@ -83,9 +83,13 @@ async fn create_window(app: AppHandle, state: AppState, path: String) -> Result<
             .position(s.x as f64, s.y as f64)
             .always_on_top(s.always_on_top);
     } else {
-        builder = builder.inner_size(1280.0, 800.0);
+        // 默认窗口居中显示，确保可见
+        builder = builder.inner_size(1280.0, 800.0).center();
     }
     let win = builder.build().map_err(|e| e.to_string())?;
+    // 确保窗口可见并聚焦
+    win.show().map_err(|e| e.to_string())?;
+    win.set_focus().map_err(|e| e.to_string())?;
 
     // 关闭时保存几何。
     let win_for_event = win.clone();
